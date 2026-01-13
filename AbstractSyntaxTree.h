@@ -51,6 +51,38 @@ public:
   Value *codegen() override;
 };
 
+class IfExprAST : public ExprAST {
+  std::unique_ptr<ExprAST> condExpr;
+  std::unique_ptr<ExprAST> thenExpr;
+  std::unique_ptr<ExprAST> elseExpr;
+
+public:
+  IfExprAST(std::unique_ptr<ExprAST> condExpr,
+            std::unique_ptr<ExprAST> thenExpr,
+            std::unique_ptr<ExprAST> elseExpr)
+      : condExpr(std::move(condExpr)), thenExpr(std::move(thenExpr)),
+        elseExpr(std::move(elseExpr)) {}
+  Value *codegen() override;
+};
+
+class ForExprAST : public ExprAST {
+  std::string varName;
+  std::unique_ptr<ExprAST> startExpr;
+  std::unique_ptr<ExprAST> endExpr;
+  std::unique_ptr<ExprAST> stepExpr;
+  std::unique_ptr<ExprAST> body;
+
+public:
+  ForExprAST(const std::string &varName, std::unique_ptr<ExprAST> startExpr,
+             std::unique_ptr<ExprAST> endExpr,
+             std::unique_ptr<ExprAST> stepExpr,
+             std::unique_ptr<ExprAST> body)
+      : varName(varName), startExpr(std::move(startExpr)),
+        endExpr(std::move(endExpr)), stepExpr(std::move(stepExpr)),
+        body(std::move(body)) {}
+  Value *codegen() override;
+};
+
 // Function calls (CallExpr is industry standard for this case)
 class CallExprAST : public ExprAST {
   std::string callee;

@@ -17,12 +17,14 @@ void initDevModeFromArgs(int argc, char **argv) {
     return;
   }
 
+  // Allow an env var to force dev logging on
   const char *envDev = std::getenv("COMPILER_DEV");
   if (envDev && std::strcmp(envDev, "0") != 0) {
     devMode = true;
     return;
   }
 
+  // Parse CLI flags
   for (int i = 1; i < argc; ++i) {
     if (std::strcmp(argv[i], "--dev") == 0 || std::strcmp(argv[i], "-d") == 0) {
       devMode = true;

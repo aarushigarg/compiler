@@ -5,6 +5,7 @@
 
 namespace Compiler {
 
+// Error helpers shared by parser and codegen
 std::unique_ptr<ExprAST> logError(const char *str) {
   fprintf(stderr, "Error: %s\n", str);
   return nullptr;

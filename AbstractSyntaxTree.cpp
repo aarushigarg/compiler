@@ -28,6 +28,7 @@ std::map<std::string, std::unique_ptr<PrototypeAST>> functionProtos;
 
 static Function *getFunction(const std::string &name) {
   devPrintf("Codegen: lookup function '%s'\n", name.c_str());
+  // Prefer existing definitions, then fall back to cached prototypes
   if (auto *func = theModule->getFunction(name)) {
     return func;
   }
@@ -79,9 +80,119 @@ Value *BinaryExprAST::codegen() {
   }
 }
 
+Value *IfExprAST::codegen() {
+  devPrintf("Codegen: if\n");
+  // Convert condition to a boolean by comparing against 0.0
+  Value *condVal = condExpr->codegen();
+  if (!condVal) {
+    return nullptr;
+  }
+
+  condVal = builder->CreateFCmpONE(
+      condVal, ConstantFP::get(*theContext, APFloat(0.0)), "ifcond");
+
+  Function *func = builder->GetInsertBlock()->getParent();
+
+  // Build then/else/merge blocks and branch on the condition
+  BasicBlock *thenBB = BasicBlock::Create(*theContext, "then", func);
+  BasicBlock *elseBB = BasicBlock::Create(*theContext, "else", func);
+  BasicBlock *mergeBB = BasicBlock::Create(*theContext, "ifcont", func);
+
+  builder->CreateCondBr(condVal, thenBB, elseBB);
+
+  builder->SetInsertPoint(thenBB);
+  Value *thenVal = thenExpr->codegen();
+  if (!thenVal) {
+    return nullptr;
+  }
+  builder->CreateBr(mergeBB);
+  thenBB = builder->GetInsertBlock();
+
+  builder->SetInsertPoint(elseBB);
+  Value *elseVal = elseExpr->codegen();
+  if (!elseVal) {
+    return nullptr;
+  }
+  builder->CreateBr(mergeBB);
+  elseBB = builder->GetInsertBlock();
+
+  builder->SetInsertPoint(mergeBB);
+  // Merge the two control-flow paths with a PHI node
+  PHINode *phi = builder->CreatePHI(Type::getDoubleTy(*theContext), 2, "iftmp");
+  phi->addIncoming(thenVal, thenBB);
+  phi->addIncoming(elseVal, elseBB);
+  return phi;
+}
+
+Value *ForExprAST::codegen() {
+  devPrintf("Codegen: for %s\n", varName.c_str());
+  // Emit the loop variable initialization
+  Value *startVal = startExpr->codegen();
+  if (!startVal) {
+    return nullptr;
+  }
+
+  Function *func = builder->GetInsertBlock()->getParent();
+  BasicBlock *preheaderBB = builder->GetInsertBlock();
+  BasicBlock *loopBB = BasicBlock::Create(*theContext, "loop", func);
+
+  builder->CreateBr(loopBB);
+  builder->SetInsertPoint(loopBB);
+
+  // Create the PHI node for the loop variable
+  PHINode *variable =
+      builder->CreatePHI(Type::getDoubleTy(*theContext), 2, varName.c_str());
+  variable->addIncoming(startVal, preheaderBB);
+
+  Value *oldVal = namedValues[varName];
+  namedValues[varName] = variable;
+
+  if (!body->codegen()) {
+    return nullptr;
+  }
+
+  // Compute the step or default to 1.0
+  Value *stepVal = nullptr;
+  if (stepExpr) {
+    stepVal = stepExpr->codegen();
+    if (!stepVal) {
+      return nullptr;
+    }
+  } else {
+    stepVal = ConstantFP::get(*theContext, APFloat(1.0));
+  }
+
+  Value *nextVar = builder->CreateFAdd(variable, stepVal, "nextvar");
+
+  // Evaluate the loop condition
+  Value *endCond = endExpr->codegen();
+  if (!endCond) {
+    return nullptr;
+  }
+
+  endCond = builder->CreateFCmpONE(
+      endCond, ConstantFP::get(*theContext, APFloat(0.0)), "loopcond");
+
+  BasicBlock *afterBB = BasicBlock::Create(*theContext, "afterloop", func);
+  builder->CreateCondBr(endCond, loopBB, afterBB);
+
+  builder->SetInsertPoint(afterBB);
+
+  variable->addIncoming(nextVar, loopBB);
+
+  // Restore any shadowed variable
+  if (oldVal) {
+    namedValues[varName] = oldVal;
+  } else {
+    namedValues.erase(varName);
+  }
+
+  return Constant::getNullValue(Type::getDoubleTy(*theContext));
+}
+
 Value *CallExprAST::codegen() {
   devPrintf("Codegen: call %s (%zu args)\n", callee.c_str(), args.size());
-  // Look up name in golbal module table
+  // Look up name in global module table
   Function *calleeF = getFunction(callee);
   if (!calleeF) {
     return logErrorV(("Unknown function referenced: " + callee).c_str());
