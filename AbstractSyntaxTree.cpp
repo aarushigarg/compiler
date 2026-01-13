@@ -56,6 +56,21 @@ Value *VariableExprAST::codegen() {
   return V;
 }
 
+Value *UnaryExprAST::codegen() {
+  devPrintf("Codegen: unary '%c'\n", op);
+  Value *operandVal = operand->codegen();
+  if (!operandVal) {
+    return nullptr;
+  }
+
+  Function *func = getFunction(std::string("unary") + op);
+  if (!func) {
+    return logErrorV("Unknown unary operator");
+  }
+
+  return builder->CreateCall(func, operandVal, "unop");
+}
+
 Value *BinaryExprAST::codegen() {
   devPrintf("Codegen: binary '%c'\n", op);
   Value *L = LHS->codegen();
@@ -76,8 +91,16 @@ Value *BinaryExprAST::codegen() {
     // Convert bool to double 0.0 or 1.0
     return builder->CreateUIToFP(L, Type::getDoubleTy(*theContext), "booltmp");
   default:
+    break;
+  }
+
+  Function *func = getFunction(std::string("binary") + op);
+  if (!func) {
     return logErrorV("invalid binary operator");
   }
+
+  Value *ops[] = {L, R};
+  return builder->CreateCall(func, ops, "binop");
 }
 
 Value *IfExprAST::codegen() {

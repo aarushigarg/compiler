@@ -29,6 +29,14 @@ static void devLogToken(int tok) {
     devPrintf("Lexer: tok_extern\n");
     return;
   }
+  if (tok == tok_binary) {
+    devPrintf("Lexer: tok_binary\n");
+    return;
+  }
+  if (tok == tok_unary) {
+    devPrintf("Lexer: tok_unary\n");
+    return;
+  }
   if (tok == tok_identifier) {
     devPrintf("Lexer: tok_identifier '%s'\n", identifierStr.c_str());
     return;
@@ -89,6 +97,14 @@ int gettok() {
     if (identifierStr == "extern") {
       devLogToken(tok_extern);
       return tok_extern;
+    }
+    if (identifierStr == "binary") {
+      devLogToken(tok_binary);
+      return tok_binary;
+    }
+    if (identifierStr == "unary") {
+      devLogToken(tok_unary);
+      return tok_unary;
     }
     if (identifierStr == "if") {
       devLogToken(tok_if);

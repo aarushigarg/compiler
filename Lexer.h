@@ -12,17 +12,19 @@ enum token {
   // commands
   tok_def = -2,
   tok_extern = -3,
+  tok_binary = -4,
+  tok_unary = -5,
 
   // primary
-  tok_identifier = -4,
-  tok_number = -5,
+  tok_identifier = -6,
+  tok_number = -7,
 
   // control
-  tok_if = -6,
-  tok_then = -7,
-  tok_else = -8,
-  tok_for = -9,
-  tok_in = -10,
+  tok_if = -8,
+  tok_then = -9,
+  tok_else = -10,
+  tok_for = -11,
+  tok_in = -12,
 };
 
 extern int curTok;                // Current token

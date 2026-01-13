@@ -6,7 +6,6 @@
 #include "LogErrors.h"
 
 #include <cctype>
-#include <cstdio>
 #include <map>
 #include <string>
 #include <utility>
@@ -127,8 +126,7 @@ std::unique_ptr<ExprAST> parseIfExpr() {
     return nullptr;
   }
 
-  return std::make_unique<IfExprAST>(std::move(condExpr),
-                                     std::move(thenExpr),
+  return std::make_unique<IfExprAST>(std::move(condExpr), std::move(thenExpr),
                                      std::move(elseExpr));
 }
 
@@ -214,6 +212,26 @@ std::unique_ptr<ExprAST> parsePrimary() {
   }
 }
 
+// unary
+//  ::= primary
+//  ::= '!' unary
+std::unique_ptr<ExprAST> parseUnary() {
+  devPrintf("Parser: parseUnary\n");
+  // If the current token is not an operator, it must be a primary expression
+  if (!isascii(curTok) || curTok == '(' || curTok == ',') {
+    return parsePrimary();
+  }
+
+  int unaryOp = curTok;
+  getNextToken();
+
+  if (auto operand = parseUnary()) {
+    return std::make_unique<UnaryExprAST>(unaryOp, std::move(operand));
+  }
+
+  return nullptr;
+}
+
 // binoprhs
 //  ::= ('+' primary)*
 std::unique_ptr<ExprAST> parseBinOpRHS(int exprPrecedence,
@@ -233,7 +251,7 @@ std::unique_ptr<ExprAST> parseBinOpRHS(int exprPrecedence,
     int binOp = curTok;
     getNextToken(); // eat binary operator
 
-    auto RHS = parsePrimary();
+    auto RHS = parseUnary();
     if (!RHS) {
       return nullptr;
     }
@@ -256,7 +274,7 @@ std::unique_ptr<ExprAST> parseBinOpRHS(int exprPrecedence,
 // expression ::= primary binoprhs
 std::unique_ptr<ExprAST> parseExpression() {
   devPrintf("Parser: parseExpression\n");
-  auto LHS = parsePrimary();
+  auto LHS = parseUnary();
   if (!LHS) {
     return nullptr;
   }
@@ -264,15 +282,47 @@ std::unique_ptr<ExprAST> parseExpression() {
   return parseBinOpRHS(0, std::move(LHS));
 }
 
-// prototype ::= id '(' id* ')'
+// prototype
+//  ::= id '(' id* ')'
+//  ::= binary LETTER number? '(' id id ')'
+//  ::= unary LETTER '(' id ')'
 std::unique_ptr<PrototypeAST> parsePrototype() {
   devPrintf("Parser: parsePrototype\n");
-  if (curTok != tok_identifier) {
-    return logErrorP("Expected function name in prototype");
-  }
+  std::string funcName;
+  unsigned kind = 0;
+  unsigned binaryPrecedence = 0;
 
-  std::string funcName = identifierStr;
-  getNextToken();
+  switch (curTok) {
+  default:
+    return logErrorP("Expected function name in prototype");
+  case tok_identifier:
+    funcName = identifierStr;
+    kind = 0;
+    getNextToken();
+    break;
+  case tok_unary:
+  case tok_binary:
+    kind = curTok;
+    getNextToken();
+    if (!isascii(curTok)) {
+      return logErrorP("Expected operator in prototype");
+    }
+    funcName =
+        (kind == tok_unary ? "unary" : "binary") + std::string(1, curTok);
+    getNextToken();
+
+    if (kind == tok_binary && curTok == tok_number) {
+      if (numVal < 1 || numVal > 100) {
+        return logErrorP("Invalid precedence: must be 1..100");
+      }
+      binaryPrecedence = static_cast<unsigned>(numVal);
+      getNextToken();
+    }
+    if (kind == tok_binary && binaryPrecedence == 0) {
+      binaryPrecedence = 30;
+    }
+    break;
+  }
 
   if (curTok != '(') {
     return logErrorP("Expected '(' in prototype");
@@ -289,7 +339,12 @@ std::unique_ptr<PrototypeAST> parsePrototype() {
 
   getNextToken(); // eat ')'
 
-  return std::make_unique<PrototypeAST>(funcName, std::move(argNames));
+  if (kind && argNames.size() != (kind == tok_unary ? 1 : 2)) {
+    return logErrorP("Invalid number of operands for operator");
+  }
+
+  return std::make_unique<PrototypeAST>(funcName, std::move(argNames),
+                                        kind != 0, binaryPrecedence);
 }
 
 // definition ::= 'def' prototype expression
@@ -300,6 +355,11 @@ std::unique_ptr<FunctionAST> parseDefinition() {
   auto prototype = parsePrototype();
   if (!prototype) {
     return nullptr;
+  }
+
+  if (prototype->isBinaryOp()) {
+    binopPrecedence[prototype->getOperatorName()] =
+        prototype->getBinaryPrecedence();
   }
 
   if (auto expr = parseExpression()) {
@@ -327,7 +387,12 @@ std::unique_ptr<FunctionAST> parseTopLevelExpr() {
 std::unique_ptr<PrototypeAST> parseExtern() {
   devPrintf("Parser: parseExtern\n");
   getNextToken(); // eat extern
-  return parsePrototype();
+  auto prototype = parsePrototype();
+  if (prototype && prototype->isBinaryOp()) {
+    binopPrecedence[prototype->getOperatorName()] =
+        prototype->getBinaryPrecedence();
+  }
+  return prototype;
 }
 
 } // namespace Compiler

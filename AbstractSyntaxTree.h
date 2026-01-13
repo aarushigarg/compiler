@@ -40,6 +40,16 @@ public:
   Value *codegen() override;
 };
 
+class UnaryExprAST : public ExprAST {
+  char op;
+  std::unique_ptr<ExprAST> operand;
+
+public:
+  UnaryExprAST(char op, std::unique_ptr<ExprAST> operand)
+      : op(op), operand(std::move(operand)) {}
+  Value *codegen() override;
+};
+
 class BinaryExprAST : public ExprAST {
   char op;
   std::unique_ptr<ExprAST> LHS, RHS;
@@ -100,16 +110,24 @@ public:
 class PrototypeAST {
   std::string name;
   std::vector<std::string> args;
+  bool isOperator;
+  unsigned precedence;
 
 public:
-  PrototypeAST(const std::string &name, std::vector<std::string> args)
-      : name(name), args(std::move(args)) {}
+  PrototypeAST(const std::string &name, std::vector<std::string> args,
+               bool isOperator = false, unsigned precedence = 0)
+      : name(name), args(std::move(args)), isOperator(isOperator),
+        precedence(precedence) {}
   const std::vector<std::string> &getArgs() const { return args; }
   std::unique_ptr<PrototypeAST> clone() const {
-    return std::make_unique<PrototypeAST>(name, args);
+    return std::make_unique<PrototypeAST>(name, args, isOperator, precedence);
   }
   Function *codegen();
   const std::string &getName() const { return name; }
+  bool isUnaryOp() const { return isOperator && name.substr(0, 5) == "unary"; }
+  bool isBinaryOp() const { return isOperator && name.substr(0, 6) == "binary"; }
+  char getOperatorName() const { return name[name.size() - 1]; }
+  unsigned getBinaryPrecedence() const { return precedence; }
 };
 
 class FunctionAST {
