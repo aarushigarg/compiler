@@ -29,14 +29,15 @@ int getTokPrecedence() {
   return tokPrecedence;
 }
 
-// std::unique_ptr<ExprAST> parseExpression();
+std::unique_ptr<ExprAST> parseExpression();
+std::unique_ptr<ExprAST> parseVarExpr();
 
 // numberexpr ::= number
 std::unique_ptr<ExprAST> parseNumberExpr() {
   devPrintf("Parser: parseNumberExpr\n");
   auto result = std::make_unique<NumberExprAST>(numVal);
   getNextToken();
-  return std::move(result);
+  return result;
 }
 
 // parenexpr ::= '(' expression ')'
@@ -194,6 +195,7 @@ std::unique_ptr<ExprAST> parseForExpr() {
 //  ::= parenexpr
 //  ::= ifexpr
 //  ::= forexpr
+//  ::= varexpr
 std::unique_ptr<ExprAST> parsePrimary() {
   devPrintf("Parser: parsePrimary\n");
   switch (curTok) {
@@ -207,9 +209,61 @@ std::unique_ptr<ExprAST> parsePrimary() {
     return parseIfExpr();
   case tok_for:
     return parseForExpr();
+  case tok_var:
+    return parseVarExpr();
   default:
     return logError("unknown token when expecting an expression");
   }
+}
+
+// varexpr ::= 'var' identifier ('=' expression)?
+//             (',' identifier ('=' expression)?)* 'in' expression
+std::unique_ptr<ExprAST> parseVarExpr() {
+  devPrintf("Parser: parseVarExpr\n");
+  getNextToken(); // eat var
+
+  std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> varNames;
+
+  if (curTok != tok_identifier) {
+    return logError("expected identifier after var");
+  }
+
+  while (true) {
+    std::string name = identifierStr;
+    getNextToken(); // eat identifier
+
+    std::unique_ptr<ExprAST> init;
+    if (curTok == '=') {
+      getNextToken(); // eat '='
+      init = parseExpression();
+      if (!init) {
+        return nullptr;
+      }
+    }
+
+    varNames.push_back(std::make_pair(name, std::move(init)));
+
+    if (curTok != ',') {
+      break;
+    }
+    getNextToken(); // eat ','
+
+    if (curTok != tok_identifier) {
+      return logError("expected identifier after ','");
+    }
+  }
+
+  if (curTok != tok_in) {
+    return logError("expected 'in' keyword after 'var'");
+  }
+  getNextToken(); // eat in
+
+  auto body = parseExpression();
+  if (!body) {
+    return nullptr;
+  }
+
+  return std::make_unique<VarExprAST>(std::move(varNames), std::move(body));
 }
 
 // unary

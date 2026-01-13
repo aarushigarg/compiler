@@ -25,6 +25,7 @@ enum token {
   tok_else = -10,
   tok_for = -11,
   tok_in = -12,
+  tok_var = -13,
 };
 
 extern int curTok;                // Current token

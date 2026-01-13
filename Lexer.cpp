@@ -65,6 +65,10 @@ static void devLogToken(int tok) {
     devPrintf("Lexer: tok_in\n");
     return;
   }
+  if (tok == tok_var) {
+    devPrintf("Lexer: tok_var\n");
+    return;
+  }
   if (tok > 0 && std::isprint(tok)) {
     devPrintf("Lexer: '%c'\n", tok);
     return;
@@ -125,6 +129,10 @@ int gettok() {
     if (identifierStr == "in") {
       devLogToken(tok_in);
       return tok_in;
+    }
+    if (identifierStr == "var") {
+      devLogToken(tok_var);
+      return tok_var;
     }
     devLogToken(tok_identifier);
     return tok_identifier;

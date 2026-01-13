@@ -23,7 +23,7 @@ namespace Compiler {
 std::unique_ptr<LLVMContext> theContext;
 std::unique_ptr<Module> theModule;
 std::unique_ptr<IRBuilder<>> builder;
-std::map<std::string, Value *> namedValues;
+std::map<std::string, AllocaInst *> namedValues;
 std::map<std::string, std::unique_ptr<PrototypeAST>> functionProtos;
 
 static Function *getFunction(const std::string &name) {
@@ -41,6 +41,14 @@ static Function *getFunction(const std::string &name) {
   return nullptr;
 }
 
+static AllocaInst *createEntryBlockAlloca(Function *func,
+                                          const std::string &varName) {
+  IRBuilder<> tmpBuilder(&func->getEntryBlock(),
+                         func->getEntryBlock().begin());
+  return tmpBuilder.CreateAlloca(Type::getDoubleTy(*theContext), nullptr,
+                                 varName.c_str());
+}
+
 Value *NumberExprAST::codegen() {
   devPrintf("Codegen: number %f\n", val);
   return ConstantFP::get(*theContext, APFloat(val));
@@ -49,11 +57,11 @@ Value *NumberExprAST::codegen() {
 Value *VariableExprAST::codegen() {
   devPrintf("Codegen: variable %s\n", name.c_str());
   // Look up variable name
-  Value *V = namedValues[name];
+  AllocaInst *V = namedValues[name];
   if (!V) {
     return logErrorV(("Unknown variable name: " + name).c_str());
   }
-  return V;
+  return builder->CreateLoad(Type::getDoubleTy(*theContext), V, name.c_str());
 }
 
 Value *UnaryExprAST::codegen() {
@@ -101,6 +109,50 @@ Value *BinaryExprAST::codegen() {
 
   Value *ops[] = {L, R};
   return builder->CreateCall(func, ops, "binop");
+}
+
+Value *VarExprAST::codegen() {
+  devPrintf("Codegen: var\n");
+  std::vector<AllocaInst *> oldBindings;
+
+  Function *func = builder->GetInsertBlock()->getParent();
+
+  for (auto &var : varNames) {
+    const std::string &name = var.first;
+    ExprAST *initExpr = var.second.get();
+
+    Value *initVal;
+    if (initExpr) {
+      initVal = initExpr->codegen();
+      if (!initVal) {
+        return nullptr;
+      }
+    } else {
+      initVal = ConstantFP::get(*theContext, APFloat(0.0));
+    }
+
+    AllocaInst *alloca = createEntryBlockAlloca(func, name);
+    builder->CreateStore(initVal, alloca);
+
+    oldBindings.push_back(namedValues[name]);
+    namedValues[name] = alloca;
+  }
+
+  Value *bodyVal = body->codegen();
+  if (!bodyVal) {
+    return nullptr;
+  }
+
+  for (unsigned i = 0; i < varNames.size(); ++i) {
+    const std::string &name = varNames[i].first;
+    if (oldBindings[i]) {
+      namedValues[name] = oldBindings[i];
+    } else {
+      namedValues.erase(name);
+    }
+  }
+
+  return bodyVal;
 }
 
 Value *IfExprAST::codegen() {
@@ -156,19 +208,16 @@ Value *ForExprAST::codegen() {
   }
 
   Function *func = builder->GetInsertBlock()->getParent();
-  BasicBlock *preheaderBB = builder->GetInsertBlock();
+  AllocaInst *alloca = createEntryBlockAlloca(func, varName);
+  builder->CreateStore(startVal, alloca);
+
   BasicBlock *loopBB = BasicBlock::Create(*theContext, "loop", func);
 
   builder->CreateBr(loopBB);
   builder->SetInsertPoint(loopBB);
 
-  // Create the PHI node for the loop variable
-  PHINode *variable =
-      builder->CreatePHI(Type::getDoubleTy(*theContext), 2, varName.c_str());
-  variable->addIncoming(startVal, preheaderBB);
-
-  Value *oldVal = namedValues[varName];
-  namedValues[varName] = variable;
+  AllocaInst *oldVal = namedValues[varName];
+  namedValues[varName] = alloca;
 
   if (!body->codegen()) {
     return nullptr;
@@ -185,7 +234,10 @@ Value *ForExprAST::codegen() {
     stepVal = ConstantFP::get(*theContext, APFloat(1.0));
   }
 
-  Value *nextVar = builder->CreateFAdd(variable, stepVal, "nextvar");
+  Value *curVar =
+      builder->CreateLoad(Type::getDoubleTy(*theContext), alloca, varName);
+  Value *nextVar = builder->CreateFAdd(curVar, stepVal, "nextvar");
+  builder->CreateStore(nextVar, alloca);
 
   // Evaluate the loop condition
   Value *endCond = endExpr->codegen();
@@ -200,8 +252,6 @@ Value *ForExprAST::codegen() {
   builder->CreateCondBr(endCond, loopBB, afterBB);
 
   builder->SetInsertPoint(afterBB);
-
-  variable->addIncoming(nextVar, loopBB);
 
   // Restore any shadowed variable
   if (oldVal) {
@@ -287,7 +337,9 @@ Function *FunctionAST::codegen() {
   // Record the function arguments in the named values map
   namedValues.clear();
   for (auto &arg : func->args()) {
-    namedValues[arg.getName().str()] = &arg;
+    AllocaInst *alloca = createEntryBlockAlloca(func, arg.getName().str());
+    builder->CreateStore(&arg, alloca);
+    namedValues[arg.getName().str()] = alloca;
   }
 
   if (Value *retVal = body->codegen()) {

@@ -8,6 +8,10 @@
 #include <string>
 #include <vector>
 
+namespace llvm {
+class AllocaInst;
+} // namespace llvm
+
 using namespace llvm;
 
 namespace Compiler {
@@ -15,7 +19,7 @@ namespace Compiler {
 extern std::unique_ptr<LLVMContext> theContext;
 extern std::unique_ptr<Module> theModule;
 extern std::unique_ptr<IRBuilder<>> builder;
-extern std::map<std::string, Value *> namedValues;
+extern std::map<std::string, AllocaInst *> namedValues;
 
 // Base class
 class ExprAST {
@@ -58,6 +62,17 @@ public:
   BinaryExprAST(char op, std::unique_ptr<ExprAST> LHS,
                 std::unique_ptr<ExprAST> RHS)
       : op(op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
+  Value *codegen() override;
+};
+
+class VarExprAST : public ExprAST {
+  std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> varNames;
+  std::unique_ptr<ExprAST> body;
+
+public:
+  VarExprAST(std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> vars,
+             std::unique_ptr<ExprAST> body)
+      : varNames(std::move(vars)), body(std::move(body)) {}
   Value *codegen() override;
 };
 
