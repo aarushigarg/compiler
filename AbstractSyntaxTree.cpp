@@ -1,5 +1,6 @@
 #include "AbstractSyntaxTree.h"
 
+#include "Debug.h"
 #include "LogErrors.h"
 
 #include "llvm/ADT/APFloat.h"
@@ -23,12 +24,29 @@ std::unique_ptr<LLVMContext> theContext;
 std::unique_ptr<Module> theModule;
 std::unique_ptr<IRBuilder<>> builder;
 std::map<std::string, Value *> namedValues;
+std::map<std::string, std::unique_ptr<PrototypeAST>> functionProtos;
+
+static Function *getFunction(const std::string &name) {
+  devPrintf("Codegen: lookup function '%s'\n", name.c_str());
+  if (auto *func = theModule->getFunction(name)) {
+    return func;
+  }
+
+  auto iter = functionProtos.find(name);
+  if (iter != functionProtos.end()) {
+    return iter->second->codegen();
+  }
+
+  return nullptr;
+}
 
 Value *NumberExprAST::codegen() {
+  devPrintf("Codegen: number %f\n", val);
   return ConstantFP::get(*theContext, APFloat(val));
 }
 
 Value *VariableExprAST::codegen() {
+  devPrintf("Codegen: variable %s\n", name.c_str());
   // Look up variable name
   Value *V = namedValues[name];
   if (!V) {
@@ -38,6 +56,7 @@ Value *VariableExprAST::codegen() {
 }
 
 Value *BinaryExprAST::codegen() {
+  devPrintf("Codegen: binary '%c'\n", op);
   Value *L = LHS->codegen();
   Value *R = RHS->codegen();
   if (!L || !R) {
@@ -61,8 +80,9 @@ Value *BinaryExprAST::codegen() {
 }
 
 Value *CallExprAST::codegen() {
+  devPrintf("Codegen: call %s (%zu args)\n", callee.c_str(), args.size());
   // Look up name in golbal module table
-  Function *calleeF = theModule->getFunction(callee);
+  Function *calleeF = getFunction(callee);
   if (!calleeF) {
     return logErrorV(("Unknown function referenced: " + callee).c_str());
   }
@@ -82,6 +102,7 @@ Value *CallExprAST::codegen() {
 }
 
 Function *PrototypeAST::codegen() {
+  devPrintf("Codegen: prototype %s (%zu args)\n", name.c_str(), args.size());
   // Function with return type double and arguments of type double
   std::vector<Type *> Doubles(args.size(), Type::getDoubleTy(*theContext));
   FunctionType *funcType =
@@ -109,6 +130,7 @@ Function *PrototypeAST::codegen() {
 }
 
 Function *FunctionAST::codegen() {
+  devPrintf("Codegen: function %s\n", prototype->getName().c_str());
   // First check for existing function from previous 'extern' declaration
   Function *func = theModule->getFunction(prototype->getName());
 

@@ -6,3 +6,4 @@ brew install ninja
 ## Build and run
 make  
 make run  
+make run-dev

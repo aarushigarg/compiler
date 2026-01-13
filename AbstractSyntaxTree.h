@@ -72,6 +72,10 @@ class PrototypeAST {
 public:
   PrototypeAST(const std::string &name, std::vector<std::string> args)
       : name(name), args(std::move(args)) {}
+  const std::vector<std::string> &getArgs() const { return args; }
+  std::unique_ptr<PrototypeAST> clone() const {
+    return std::make_unique<PrototypeAST>(name, args);
+  }
   Function *codegen();
   const std::string &getName() const { return name; }
 };
@@ -84,7 +88,10 @@ public:
   FunctionAST(std::unique_ptr<PrototypeAST> prototype,
               std::unique_ptr<ExprAST> body)
       : prototype(std::move(prototype)), body(std::move(body)) {}
+  const PrototypeAST &getProto() const { return *prototype; }
   Function *codegen();
 };
+
+extern std::map<std::string, std::unique_ptr<PrototypeAST>> functionProtos;
 
 }; // namespace Compiler
