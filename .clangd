@@ -1,4 +1,0 @@
-CompileFlags:
-  Add:
-    - -I/usr/local/opt/llvm/include
-    - -stdlib=libc++
