@@ -4,8 +4,11 @@
 #include "LogErrors.h"
 
 #include "llvm/ADT/APFloat.h"
+#include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DIBuilder.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Type.h"
@@ -25,6 +28,86 @@ std::unique_ptr<Module> theModule;
 std::unique_ptr<IRBuilder<>> builder;
 std::map<std::string, AllocaInst *> namedValues;
 std::map<std::string, std::unique_ptr<PrototypeAST>> functionProtos;
+
+namespace {
+
+class DebugInfo {
+public:
+  std::unique_ptr<DIBuilder> diBuilder;
+  DICompileUnit *compileUnit = nullptr;
+  DIFile *unit = nullptr;
+  DIType *doubleType = nullptr;
+  std::vector<DIScope *> lexicalBlocks;
+
+  void initialize(Module &module, const std::string &sourceName) {
+    diBuilder = std::make_unique<DIBuilder>(module);
+    unit = diBuilder->createFile(sourceName, ".");
+    compileUnit = diBuilder->createCompileUnit(
+        dwarf::DW_LANG_C, unit, "Compiler", false, "", 0);
+    doubleType = nullptr;
+    lexicalBlocks.clear();
+  }
+
+  void finalize() {
+    if (diBuilder) {
+      diBuilder->finalize();
+    }
+  }
+
+  DIType *getDoubleType() {
+    if (!doubleType) {
+      doubleType = diBuilder->createBasicType("double", 64, dwarf::DW_ATE_float);
+    }
+    return doubleType;
+  }
+
+  DISubroutineType *createFunctionType(unsigned argCount) {
+    std::vector<Metadata *> types;
+    types.push_back(getDoubleType());
+    for (unsigned i = 0; i < argCount; ++i) {
+      types.push_back(getDoubleType());
+    }
+    return diBuilder->createSubroutineType(diBuilder->getOrCreateTypeArray(types));
+  }
+
+  DIScope *currentScope() const {
+    if (!lexicalBlocks.empty()) {
+      return lexicalBlocks.back();
+    }
+    return unit;
+  }
+
+  void emitLocation(const ExprAST *expr) {
+    if (!expr) {
+      Compiler::builder->SetCurrentDebugLocation(DebugLoc());
+      return;
+    }
+
+    SourceLocation loc = expr->getLoc();
+    if (loc.line <= 0 || loc.col <= 0) {
+      return;
+    }
+
+    IRBuilderBase::InsertPoint insertPt = Compiler::builder->saveIP();
+    if (!insertPt.getBlock()) {
+      return;
+    }
+
+    Compiler::builder->SetCurrentDebugLocation(
+        DILocation::get(insertPt.getBlock()->getContext(), loc.line, loc.col,
+                        currentScope()));
+  }
+};
+
+DebugInfo debugInfo;
+
+} // namespace
+
+void initializeDebugInfo(const std::string &sourceName) {
+  debugInfo.initialize(*theModule, sourceName);
+}
+
+void finalizeDebugInfo() { debugInfo.finalize(); }
 
 static Function *getFunction(const std::string &name) {
   devPrintf("Codegen: lookup function '%s'\n", name.c_str());
@@ -50,11 +133,13 @@ static AllocaInst *createEntryBlockAlloca(Function *func,
 }
 
 Value *NumberExprAST::codegen() {
+  debugInfo.emitLocation(this);
   devPrintf("Codegen: number %f\n", val);
   return ConstantFP::get(*theContext, APFloat(val));
 }
 
 Value *VariableExprAST::codegen() {
+  debugInfo.emitLocation(this);
   devPrintf("Codegen: variable %s\n", name.c_str());
   // Look up variable name
   AllocaInst *V = namedValues[name];
@@ -65,6 +150,7 @@ Value *VariableExprAST::codegen() {
 }
 
 Value *UnaryExprAST::codegen() {
+  debugInfo.emitLocation(this);
   devPrintf("Codegen: unary '%c'\n", op);
   Value *operandVal = operand->codegen();
   if (!operandVal) {
@@ -80,6 +166,7 @@ Value *UnaryExprAST::codegen() {
 }
 
 Value *BinaryExprAST::codegen() {
+  debugInfo.emitLocation(this);
   devPrintf("Codegen: binary '%c'\n", op);
   Value *L = LHS->codegen();
   Value *R = RHS->codegen();
@@ -112,10 +199,14 @@ Value *BinaryExprAST::codegen() {
 }
 
 Value *VarExprAST::codegen() {
+  debugInfo.emitLocation(this);
   devPrintf("Codegen: var\n");
   std::vector<AllocaInst *> oldBindings;
 
   Function *func = builder->GetInsertBlock()->getParent();
+  DILexicalBlock *scopeBlock = debugInfo.diBuilder->createLexicalBlock(
+      debugInfo.currentScope(), debugInfo.unit, getLoc().line, getLoc().col);
+  debugInfo.lexicalBlocks.push_back(scopeBlock);
 
   for (auto &var : varNames) {
     const std::string &name = var.first;
@@ -125,6 +216,7 @@ Value *VarExprAST::codegen() {
     if (initExpr) {
       initVal = initExpr->codegen();
       if (!initVal) {
+        debugInfo.lexicalBlocks.pop_back();
         return nullptr;
       }
     } else {
@@ -134,14 +226,18 @@ Value *VarExprAST::codegen() {
     AllocaInst *alloca = createEntryBlockAlloca(func, name);
     builder->CreateStore(initVal, alloca);
 
+    DILocalVariable *debugVar = debugInfo.diBuilder->createAutoVariable(
+        scopeBlock, name, debugInfo.unit, getLoc().line, debugInfo.getDoubleType());
+    debugInfo.diBuilder->insertDeclare(
+        alloca, debugVar, debugInfo.diBuilder->createExpression(),
+        DILocation::get(*theContext, getLoc().line, getLoc().col, scopeBlock),
+        builder->GetInsertBlock());
+
     oldBindings.push_back(namedValues[name]);
     namedValues[name] = alloca;
   }
 
   Value *bodyVal = body->codegen();
-  if (!bodyVal) {
-    return nullptr;
-  }
 
   for (unsigned i = 0; i < varNames.size(); ++i) {
     const std::string &name = varNames[i].first;
@@ -152,10 +248,16 @@ Value *VarExprAST::codegen() {
     }
   }
 
+  debugInfo.lexicalBlocks.pop_back();
+  if (!bodyVal) {
+    return nullptr;
+  }
+
   return bodyVal;
 }
 
 Value *IfExprAST::codegen() {
+  debugInfo.emitLocation(this);
   devPrintf("Codegen: if\n");
   // Convert condition to a boolean by comparing against 0.0
   Value *condVal = condExpr->codegen();
@@ -200,6 +302,7 @@ Value *IfExprAST::codegen() {
 }
 
 Value *ForExprAST::codegen() {
+  debugInfo.emitLocation(this);
   devPrintf("Codegen: for %s\n", varName.c_str());
   // Emit the loop variable initialization
   Value *startVal = startExpr->codegen();
@@ -211,6 +314,16 @@ Value *ForExprAST::codegen() {
   AllocaInst *alloca = createEntryBlockAlloca(func, varName);
   builder->CreateStore(startVal, alloca);
 
+  DILexicalBlock *scopeBlock = debugInfo.diBuilder->createLexicalBlock(
+      debugInfo.currentScope(), debugInfo.unit, getLoc().line, getLoc().col);
+  debugInfo.lexicalBlocks.push_back(scopeBlock);
+  DILocalVariable *debugVar = debugInfo.diBuilder->createAutoVariable(
+      scopeBlock, varName, debugInfo.unit, getLoc().line, debugInfo.getDoubleType());
+  debugInfo.diBuilder->insertDeclare(
+      alloca, debugVar, debugInfo.diBuilder->createExpression(),
+      DILocation::get(*theContext, getLoc().line, getLoc().col, scopeBlock),
+      builder->GetInsertBlock());
+
   BasicBlock *loopBB = BasicBlock::Create(*theContext, "loop", func);
 
   builder->CreateBr(loopBB);
@@ -220,6 +333,7 @@ Value *ForExprAST::codegen() {
   namedValues[varName] = alloca;
 
   if (!body->codegen()) {
+    debugInfo.lexicalBlocks.pop_back();
     return nullptr;
   }
 
@@ -228,6 +342,7 @@ Value *ForExprAST::codegen() {
   if (stepExpr) {
     stepVal = stepExpr->codegen();
     if (!stepVal) {
+      debugInfo.lexicalBlocks.pop_back();
       return nullptr;
     }
   } else {
@@ -242,6 +357,7 @@ Value *ForExprAST::codegen() {
   // Evaluate the loop condition
   Value *endCond = endExpr->codegen();
   if (!endCond) {
+    debugInfo.lexicalBlocks.pop_back();
     return nullptr;
   }
 
@@ -259,11 +375,13 @@ Value *ForExprAST::codegen() {
   } else {
     namedValues.erase(varName);
   }
+  debugInfo.lexicalBlocks.pop_back();
 
   return Constant::getNullValue(Type::getDoubleTy(*theContext));
 }
 
 Value *CallExprAST::codegen() {
+  debugInfo.emitLocation(this);
   devPrintf("Codegen: call %s (%zu args)\n", callee.c_str(), args.size());
   // Look up name in global module table
   Function *calleeF = getFunction(callee);
@@ -330,29 +448,51 @@ Function *FunctionAST::codegen() {
     return logErrorF("Function already defined");
   }
 
+  SourceLocation protoLoc = prototype->getLoc();
+  DISubprogram *subprogram = debugInfo.diBuilder->createFunction(
+      debugInfo.unit, prototype->getName(), StringRef(), debugInfo.unit,
+      protoLoc.line, debugInfo.createFunctionType(func->arg_size()),
+      protoLoc.line, DINode::FlagPrototyped, DISubprogram::SPFlagDefinition);
+  func->setSubprogram(subprogram);
+  debugInfo.lexicalBlocks.push_back(subprogram);
+
   // Create a new basic block to start insertion into
   BasicBlock *basicBlock = BasicBlock::Create(*theContext, "entry", func);
   builder->SetInsertPoint(basicBlock);
+  debugInfo.emitLocation(nullptr);
 
   // Record the function arguments in the named values map
   namedValues.clear();
+  unsigned argNo = 0;
   for (auto &arg : func->args()) {
+    ++argNo;
     AllocaInst *alloca = createEntryBlockAlloca(func, arg.getName().str());
     builder->CreateStore(&arg, alloca);
     namedValues[arg.getName().str()] = alloca;
+
+    DILocalVariable *debugArg = debugInfo.diBuilder->createParameterVariable(
+        subprogram, arg.getName(), argNo, debugInfo.unit, protoLoc.line,
+        debugInfo.getDoubleType(), true);
+    debugInfo.diBuilder->insertDeclare(
+        alloca, debugArg, debugInfo.diBuilder->createExpression(),
+        DILocation::get(*theContext, protoLoc.line, 0, subprogram),
+        basicBlock);
   }
 
+  debugInfo.emitLocation(body.get());
   if (Value *retVal = body->codegen()) {
     // Finish the function by creating ret
     builder->CreateRet(retVal);
 
     // Validate the generated function
     verifyFunction(*func);
+    debugInfo.lexicalBlocks.pop_back();
 
     return func;
   }
 
   // Error reading body, remove function
+  debugInfo.lexicalBlocks.pop_back();
   func->eraseFromParent();
   return nullptr;
 }

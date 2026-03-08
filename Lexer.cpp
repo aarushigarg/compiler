@@ -11,6 +11,20 @@ namespace Compiler {
 int curTok;
 std::string identifierStr;
 double numVal;
+SourceLocation curLoc = {1, 1};
+
+static SourceLocation lexLoc = {1, 0};
+
+static int advance() {
+  int nextChar = getchar();
+  if (nextChar == '\n' || nextChar == '\r') {
+    ++lexLoc.line;
+    lexLoc.col = 0;
+  } else if (nextChar != EOF) {
+    ++lexLoc.col;
+  }
+  return nextChar;
+}
 
 // Dev-only token tracing to follow the lexer stream
 static void devLogToken(int tok) {
@@ -82,15 +96,18 @@ int gettok() {
 
   // Skip whitespace
   while (isspace(lastChar)) {
-    lastChar = getchar();
+    lastChar = advance();
   }
+
+  // The location of this token is the location of lastChar.
+  curLoc = lexLoc;
 
   // Identifier or keyword
   if (isalpha(lastChar)) {
     // Starts with letter
     identifierStr = lastChar;
     // Rest is alphanumeric
-    while (isalnum((lastChar = getchar()))) {
+    while (isalnum((lastChar = advance()))) {
       identifierStr += lastChar;
     }
 
@@ -143,7 +160,7 @@ int gettok() {
     std::string numStr;
     do {
       numStr += lastChar;
-      lastChar = getchar();
+      lastChar = advance();
     } while (isdigit(lastChar) || lastChar == '.');
 
     numVal = strtod(numStr.c_str(), nullptr);
@@ -154,7 +171,7 @@ int gettok() {
   // Comment
   if (lastChar == '#') {
     do {
-      lastChar = getchar();
+      lastChar = advance();
     } while (lastChar != EOF && lastChar != '\n' && lastChar != '\r');
 
     if (lastChar != EOF) {
@@ -170,7 +187,7 @@ int gettok() {
 
   // Otherwise return the ASCII value of the character
   int thisChar = lastChar;
-  lastChar = getchar();
+  lastChar = advance();
   devLogToken(thisChar);
   return thisChar;
 }

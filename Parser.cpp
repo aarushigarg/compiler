@@ -35,7 +35,7 @@ std::unique_ptr<ExprAST> parseVarExpr();
 // numberexpr ::= number
 std::unique_ptr<ExprAST> parseNumberExpr() {
   devPrintf("Parser: parseNumberExpr\n");
-  auto result = std::make_unique<NumberExprAST>(numVal);
+  auto result = std::make_unique<NumberExprAST>(numVal, curLoc);
   getNextToken();
   return result;
 }
@@ -61,12 +61,13 @@ std::unique_ptr<ExprAST> parseParenExpr() {
 //  ::= identifier '(' expression* ')'
 std::unique_ptr<ExprAST> parseIdentifierExpr() {
   devPrintf("Parser: parseIdentifierExpr\n");
+  SourceLocation idLoc = curLoc;
   std::string idName = identifierStr;
   getNextToken(); // eat identifier
 
   if (curTok != '(') {
     // Simple variable ref
-    return std::make_unique<VariableExprAST>(idName);
+    return std::make_unique<VariableExprAST>(idName, idLoc);
   }
 
   // Function call
@@ -93,12 +94,13 @@ std::unique_ptr<ExprAST> parseIdentifierExpr() {
   }
   getNextToken(); // eat ')'
 
-  return std::make_unique<CallExprAST>(idName, std::move(args));
+  return std::make_unique<CallExprAST>(idName, std::move(args), idLoc);
 }
 
 // ifexpr ::= 'if' expression 'then' expression 'else' expression
 std::unique_ptr<ExprAST> parseIfExpr() {
   devPrintf("Parser: parseIfExpr\n");
+  SourceLocation ifLoc = curLoc;
   // Parse conditional and both branches
   getNextToken(); // eat if
 
@@ -128,12 +130,13 @@ std::unique_ptr<ExprAST> parseIfExpr() {
   }
 
   return std::make_unique<IfExprAST>(std::move(condExpr), std::move(thenExpr),
-                                     std::move(elseExpr));
+                                     std::move(elseExpr), ifLoc);
 }
 
 // forexpr ::= 'for' identifier '=' expr ',' expr (',' expr)? 'in' expression
 std::unique_ptr<ExprAST> parseForExpr() {
   devPrintf("Parser: parseForExpr\n");
+  SourceLocation forLoc = curLoc;
   getNextToken(); // eat for
 
   if (curTok != tok_identifier) {
@@ -186,7 +189,7 @@ std::unique_ptr<ExprAST> parseForExpr() {
 
   return std::make_unique<ForExprAST>(idName, std::move(startExpr),
                                       std::move(endExpr), std::move(stepExpr),
-                                      std::move(body));
+                                      std::move(body), forLoc);
 }
 
 // primary
@@ -220,6 +223,7 @@ std::unique_ptr<ExprAST> parsePrimary() {
 //             (',' identifier ('=' expression)?)* 'in' expression
 std::unique_ptr<ExprAST> parseVarExpr() {
   devPrintf("Parser: parseVarExpr\n");
+  SourceLocation varLoc = curLoc;
   getNextToken(); // eat var
 
   std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> varNames;
@@ -263,7 +267,8 @@ std::unique_ptr<ExprAST> parseVarExpr() {
     return nullptr;
   }
 
-  return std::make_unique<VarExprAST>(std::move(varNames), std::move(body));
+  return std::make_unique<VarExprAST>(std::move(varNames), std::move(body),
+                                      varLoc);
 }
 
 // unary
@@ -277,10 +282,11 @@ std::unique_ptr<ExprAST> parseUnary() {
   }
 
   int unaryOp = curTok;
+  SourceLocation opLoc = curLoc;
   getNextToken();
 
   if (auto operand = parseUnary()) {
-    return std::make_unique<UnaryExprAST>(unaryOp, std::move(operand));
+    return std::make_unique<UnaryExprAST>(unaryOp, std::move(operand), opLoc);
   }
 
   return nullptr;
@@ -303,6 +309,7 @@ std::unique_ptr<ExprAST> parseBinOpRHS(int exprPrecedence,
     }
 
     int binOp = curTok;
+    SourceLocation opLoc = curLoc;
     getNextToken(); // eat binary operator
 
     auto RHS = parseUnary();
@@ -320,8 +327,8 @@ std::unique_ptr<ExprAST> parseBinOpRHS(int exprPrecedence,
     }
 
     // Combine LHS and RHS
-    LHS =
-        std::make_unique<BinaryExprAST>(binOp, std::move(LHS), std::move(RHS));
+    LHS = std::make_unique<BinaryExprAST>(binOp, std::move(LHS),
+                                          std::move(RHS), opLoc);
   }
 }
 
@@ -345,6 +352,7 @@ std::unique_ptr<PrototypeAST> parsePrototype() {
   std::string funcName;
   unsigned kind = 0;
   unsigned binaryPrecedence = 0;
+  SourceLocation protoLoc = curLoc;
 
   switch (curTok) {
   default:
@@ -398,7 +406,7 @@ std::unique_ptr<PrototypeAST> parsePrototype() {
   }
 
   return std::make_unique<PrototypeAST>(funcName, std::move(argNames),
-                                        kind != 0, binaryPrecedence);
+                                        kind != 0, binaryPrecedence, protoLoc);
 }
 
 // definition ::= 'def' prototype expression
@@ -429,8 +437,8 @@ std::unique_ptr<FunctionAST> parseTopLevelExpr() {
   devPrintf("Parser: parseTopLevelExpr\n");
   if (auto expr = parseExpression()) {
     devPrintf("Parser: create __anon_expr prototype\n");
-    auto prototype = std::make_unique<PrototypeAST>("__anon_expr",
-                                                    std::vector<std::string>());
+    auto prototype = std::make_unique<PrototypeAST>(
+        "__anon_expr", std::vector<std::string>(), false, 0, expr->getLoc());
     return std::make_unique<FunctionAST>(std::move(prototype), std::move(expr));
   }
 

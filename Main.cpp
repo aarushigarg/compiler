@@ -4,6 +4,7 @@
 #include "Parser.h"
 
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IR/Metadata.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/TargetSelect.h"
@@ -63,7 +64,13 @@ void handleTopLevelExpression() {
 void initializeModule() {
   theContext = std::make_unique<LLVMContext>();
   theModule = std::make_unique<Module>("Compiler", *theContext);
+  theModule->addModuleFlag(llvm::Module::Warning, "Debug Info Version",
+                           llvm::DEBUG_METADATA_VERSION);
+  if (llvm::Triple(llvm::sys::getProcessTriple()).isOSDarwin()) {
+    theModule->addModuleFlag(llvm::Module::Warning, "Dwarf Version", 2);
+  }
   builder = std::make_unique<IRBuilder<>>(*theContext);
+  initializeDebugInfo("stdin.ks");
 }
 
 void setup() {
@@ -83,6 +90,7 @@ void setup() {
 }
 
 bool emitObjectFile(const std::string &filename) {
+  finalizeDebugInfo();
   InitializeAllTargetInfos();
   InitializeAllTargets();
   InitializeAllTargetMCs();

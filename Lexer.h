@@ -1,5 +1,7 @@
 #pragma once
 
+#include "SourceLocation.h"
+
 #include <string>
 
 namespace Compiler {
@@ -31,6 +33,7 @@ enum token {
 extern int curTok;                // Current token
 extern std::string identifierStr; // Contains value if tok_identifier
 extern double numVal;             // Contains value if tok_number
+extern SourceLocation curLoc;     // Source location of current token
 
 int gettok();
 int getNextToken();
