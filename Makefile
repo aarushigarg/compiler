@@ -1,7 +1,7 @@
 CC := $(shell brew --prefix llvm)/bin/clang++
 
 LLVM_CXXFLAGS := $(shell llvm-config --cxxflags)
-LLVM_LDFLAGS  := $(shell llvm-config --ldflags --system-libs --libs core orcjit native passes)
+LLVM_LDFLAGS  := $(shell llvm-config --ldflags --system-libs --libs all)
 
 CXXFLAGS := -std=c++17 -g -O3 $(LLVM_CXXFLAGS) -Iinclude
 SOURCES  := Main.cpp Lexer.cpp Parser.cpp AbstractSyntaxTree.cpp LogErrors.cpp Debug.cpp
@@ -21,4 +21,4 @@ run-dev: $(TARGET)
 	./$(TARGET) --dev
 
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) *.o

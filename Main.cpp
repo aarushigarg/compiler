@@ -1,48 +1,33 @@
 #include "AbstractSyntaxTree.h"
 #include "Debug.h"
-#include "KaleidoscopeJIT.h"
 #include "Lexer.h"
 #include "Parser.h"
 
-#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
-#include "llvm/IR/PassManager.h"
-#include "llvm/Passes/PassBuilder.h"
-#include "llvm/Support/Error.h"
+#include "llvm/IR/LegacyPassManager.h"
+#include "llvm/MC/TargetRegistry.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/TargetSelect.h"
-#include "llvm/Transforms/InstCombine/InstCombine.h"
-#include "llvm/Transforms/Scalar.h"
-#include "llvm/Transforms/Scalar/GVN.h"
-#include "llvm/Transforms/Scalar/Reassociate.h"
-#include "llvm/Transforms/Scalar/SimplifyCFG.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetOptions.h"
+#include "llvm/TargetParser/Host.h"
 
 #include <cstdio>
+#include <optional>
+#include <system_error>
 
 namespace Compiler {
 
 extern std::map<char, int> binopPrecedence;
 
-static llvm::ExitOnError exitOnErr;
-
-static std::unique_ptr<llvm::orc::KaleidoscopeJIT> theJIT;
-static std::unique_ptr<llvm::FunctionPassManager> functionPassManager;
-static std::unique_ptr<llvm::LoopAnalysisManager> loopAnalysisManager;
-static std::unique_ptr<llvm::FunctionAnalysisManager> functionAnalysisManager;
-static std::unique_ptr<llvm::CGSCCAnalysisManager> cgsccAnalysisManager;
-static std::unique_ptr<llvm::ModuleAnalysisManager> moduleAnalysisManager;
-
 void initializeModule();
+bool emitObjectFile(const std::string &filename);
 
 void handleDefinition() {
   if (auto funcAST = parseDefinition()) {
     functionProtos[funcAST->getProto().getName()] = funcAST->getProto().clone();
     if (auto *funcIR = funcAST->codegen()) {
-      // Run the optimization pipeline and JIT the compiled function
-      devPrintf("Optimizing function: %s\n", funcIR->getName().str().c_str());
-      functionPassManager->run(*funcIR, *functionAnalysisManager);
       devPrintIR("Read function definition: ", funcIR);
-      exitOnErr(theJIT->addModule(llvm::orc::ThreadSafeModule(
-          std::move(theModule), std::move(theContext))));
-      initializeModule();
     }
   } else {
     // Skip token for error recovery
@@ -63,25 +48,11 @@ void handleExtern() {
 }
 
 void handleTopLevelExpression() {
-  // Wrap in anonymous function
+  // Parse and codegen anonymous top-level expression.
   if (auto funcAST = parseTopLevelExpr()) {
     if (auto *funcIR = funcAST->codegen()) {
-      // Optimize, JIT, and immediately run the expression
-      functionPassManager->run(*funcIR, *functionAnalysisManager);
-      devPrintIR("Read top-level expression: \n", funcIR);
-
-      auto resourceTracker = theJIT->getMainJITDylib().createResourceTracker();
-      exitOnErr(
-          theJIT->addModule(llvm::orc::ThreadSafeModule(std::move(theModule),
-                                                        std::move(theContext)),
-                            resourceTracker));
-      initializeModule();
-
-      auto exprSymbol = exitOnErr(theJIT->lookup("__anon_expr"));
-      auto *fp = exprSymbol.getAddress().toPtr<double (*)()>();
-      fprintf(stderr, "Evaluated to %f\n", fp());
-
-      exitOnErr(resourceTracker->remove());
+      devPrintIR("Read top-level expression: ", funcIR);
+      funcIR->eraseFromParent();
     }
   } else {
     // Skip token for error recovery
@@ -92,39 +63,10 @@ void handleTopLevelExpression() {
 void initializeModule() {
   theContext = std::make_unique<LLVMContext>();
   theModule = std::make_unique<Module>("Compiler", *theContext);
-  theModule->setDataLayout(theJIT->getDataLayout());
   builder = std::make_unique<IRBuilder<>>(*theContext);
-
-  // Function-level scalar optimization pipeline
-  functionPassManager = std::make_unique<llvm::FunctionPassManager>();
-  functionPassManager->addPass(InstCombinePass());
-  functionPassManager->addPass(ReassociatePass());
-  functionPassManager->addPass(GVNPass());
-  functionPassManager->addPass(SimplifyCFGPass());
-
-  // Analysis managers required by the new pass manager
-  loopAnalysisManager = std::make_unique<llvm::LoopAnalysisManager>();
-  functionAnalysisManager = std::make_unique<llvm::FunctionAnalysisManager>();
-  cgsccAnalysisManager = std::make_unique<llvm::CGSCCAnalysisManager>();
-  moduleAnalysisManager = std::make_unique<llvm::ModuleAnalysisManager>();
-
-  llvm::PassBuilder passBuilder;
-  passBuilder.registerModuleAnalyses(*moduleAnalysisManager);
-  passBuilder.registerCGSCCAnalyses(*cgsccAnalysisManager);
-  passBuilder.registerFunctionAnalyses(*functionAnalysisManager);
-  passBuilder.registerLoopAnalyses(*loopAnalysisManager);
-  passBuilder.crossRegisterProxies(
-      *loopAnalysisManager, *functionAnalysisManager, *cgsccAnalysisManager,
-      *moduleAnalysisManager);
 }
 
 void setup() {
-  // Initialize the native target and JIT
-  InitializeNativeTarget();
-  InitializeNativeTargetAsmPrinter();
-  InitializeNativeTargetAsmParser();
-  theJIT = exitOnErr(llvm::orc::KaleidoscopeJIT::Create());
-
   // Install standard binary operators
   // 1 is lowest precedence
   binopPrecedence['<'] = 10;
@@ -138,6 +80,55 @@ void setup() {
 
   // Initialize
   initializeModule();
+}
+
+bool emitObjectFile(const std::string &filename) {
+  InitializeAllTargetInfos();
+  InitializeAllTargets();
+  InitializeAllTargetMCs();
+  InitializeAllAsmParsers();
+  InitializeAllAsmPrinters();
+
+  std::string targetTripleStr = llvm::sys::getDefaultTargetTriple();
+  llvm::Triple targetTriple(targetTripleStr);
+  theModule->setTargetTriple(targetTriple);
+
+  std::string error;
+  auto *target = llvm::TargetRegistry::lookupTarget(targetTriple, error);
+  if (!target) {
+    llvm::errs() << error << '\n';
+    return false;
+  }
+
+  auto CPU = "generic";
+  auto features = "";
+
+  llvm::TargetOptions options;
+  auto relocationModel = std::optional<llvm::Reloc::Model>(llvm::Reloc::PIC_);
+  std::unique_ptr<llvm::TargetMachine> targetMachine(
+      target->createTargetMachine(targetTriple, CPU, features, options,
+                                  relocationModel));
+
+  theModule->setDataLayout(targetMachine->createDataLayout());
+
+  std::error_code errorCode;
+  llvm::raw_fd_ostream dest(filename, errorCode, llvm::sys::fs::OF_None);
+  if (errorCode) {
+    llvm::errs() << "Could not open file: " << errorCode.message() << '\n';
+    return false;
+  }
+
+  llvm::legacy::PassManager pass;
+  auto fileType = llvm::CodeGenFileType::ObjectFile;
+  if (targetMachine->addPassesToEmitFile(pass, dest, nullptr, fileType)) {
+    llvm::errs() << "TheTargetMachine can't emit a file of this type\n";
+    return false;
+  }
+
+  pass.run(*theModule);
+  dest.flush();
+  llvm::outs() << "Wrote " << filename << '\n';
+  return true;
 }
 
 // top ::= definition | external | expression | ';'
@@ -171,6 +162,9 @@ int main(int argc, char **argv) {
   Compiler::initDevModeFromArgs(argc, argv);
   // Run the main "interpreter loop"
   Compiler::mainLoop();
+  if (!Compiler::emitObjectFile("output.o")) {
+    return 1;
+  }
 
   return 0;
 }
