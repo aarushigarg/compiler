@@ -90,3 +90,10 @@ def usesync()
 def useasync()
   var ignored = async printd(99) in
     sync() + ignored
+
+def printsum4(a b c d)
+  printd(a + b + c + d)
+
+def useasync4()
+  var ignored = async printsum4(1, 2, 3, 4) in
+    sync() + ignored

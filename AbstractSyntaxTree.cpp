@@ -10,6 +10,7 @@
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Verifier.h"
 
@@ -100,6 +101,7 @@ public:
 };
 
 DebugInfo debugInfo;
+std::size_t asyncWrapperCounter = 0;
 
 } // namespace
 
@@ -141,6 +143,58 @@ static Function *getOrCreateRuntimeFunction(const std::string &name,
 
   return Function::Create(funcType, Function::ExternalLinkage, name,
                           theModule.get());
+}
+
+static Function *getOrCreateMallocFunction() {
+  FunctionType *mallocType = FunctionType::get(
+      PointerType::get(*theContext, 0), {Type::getInt64Ty(*theContext)}, false);
+  return getOrCreateRuntimeFunction("malloc", mallocType);
+}
+
+static Function *getOrCreateFreeFunction() {
+  FunctionType *freeType = FunctionType::get(
+      Type::getVoidTy(*theContext), {PointerType::get(*theContext, 0)}, false);
+  return getOrCreateRuntimeFunction("free", freeType);
+}
+
+static Function *createAsyncWrapper(Function *calleeF, std::size_t argCount) {
+  PointerType *ptrTy = PointerType::get(*theContext, 0);
+  Type *doubleTy = Type::getDoubleTy(*theContext);
+  // Each wrapper has the generic runtime shape: void wrapper(void *data).
+  FunctionType *wrapperType =
+      FunctionType::get(Type::getVoidTy(*theContext), {ptrTy}, false);
+  std::string wrapperName =
+      "__compiler_async_wrapper_" + std::to_string(asyncWrapperCounter++);
+  Function *wrapperFunc = Function::Create(
+      wrapperType, Function::PrivateLinkage, wrapperName, theModule.get());
+
+  BasicBlock *entryBB = BasicBlock::Create(*theContext, "entry", wrapperFunc);
+  IRBuilder<> wrapperBuilder(entryBB);
+
+  Argument *rawData = wrapperFunc->getArg(0);
+  rawData->setName("rawdata");
+  // The payload is stored as a heap array of doubles.
+  Value *doubleData = wrapperBuilder.CreateBitCast(rawData, ptrTy, "args");
+
+  std::vector<Value *> callArgs;
+  callArgs.reserve(argCount);
+  for (std::size_t i = 0; i < argCount; ++i) {
+    // Load each argument back out of the payload in order.
+    Value *index = ConstantInt::get(Type::getInt64Ty(*theContext),
+                                    static_cast<uint64_t>(i));
+    Value *argPtr =
+        wrapperBuilder.CreateInBoundsGEP(doubleTy, doubleData, index, "argptr");
+    callArgs.push_back(
+        wrapperBuilder.CreateLoad(doubleTy, argPtr, "arg" + std::to_string(i)));
+  }
+
+  // Call the original function, then free the heap payload.
+  wrapperBuilder.CreateCall(calleeF, callArgs);
+  Function *freeFunc = getOrCreateFreeFunction();
+  wrapperBuilder.CreateCall(freeFunc, rawData);
+  wrapperBuilder.CreateRetVoid();
+  verifyFunction(*wrapperFunc);
+  return wrapperFunc;
 }
 
 Value *NumberExprAST::codegen() {
@@ -426,43 +480,72 @@ Value *SyncExprAST::codegen() {
 Value *AsyncExprAST::codegen() {
   debugInfo.emitLocation(this);
 
+  // The async payload lives past the current function, so it must be heap
+  // allocated instead of using an alloca in the caller's stack frame.
+  Function *mallocFunc = getOrCreateMallocFunction();
+  if (!mallocFunc) {
+    return logErrorV("Could not declare malloc");
+  }
+
+  // Resolve the function being scheduled.
   Function *calleeF = getFunction(callee);
   if (!calleeF) {
-    return logErrorV(("Unknown function referenced in async: " + callee).c_str());
+    return logErrorV(
+        ("Unknown function referenced in async: " + callee).c_str());
   }
   if (calleeF->arg_size() != args.size()) {
     return logErrorV("Incorrect number of arguments passed to async");
   }
-  if (args.size() > 3) {
-    return logErrorV("async currently supports up to 3 arguments");
-  }
 
-  std::vector<Value *> asyncArgs;
-  asyncArgs.push_back(calleeF);
-
+  // Evaluate async arguments and store their values in a payload.
+  std::vector<Value *> argValues;
+  argValues.reserve(args.size());
   for (auto &arg : args) {
     Value *argVal = arg->codegen();
     if (!argVal) {
       return nullptr;
     }
-    asyncArgs.push_back(argVal);
+    argValues.push_back(argVal);
   }
 
-  std::vector<Type *> helperArgs;
-  helperArgs.push_back(calleeF->getType());
-  for (std::size_t i = 0; i < args.size(); ++i) {
-    helperArgs.push_back(Type::getDoubleTy(*theContext));
+  Type *doubleTy = Type::getDoubleTy(*theContext);
+  PointerType *ptrTy = PointerType::get(*theContext, 0);
+
+  // No-argument async calls can use a null payload.
+  Value *rawData = ConstantPointerNull::get(ptrTy);
+  if (!argValues.empty()) {
+    uint64_t payloadBytes = static_cast<uint64_t>(argValues.size()) *
+                            (doubleTy->getPrimitiveSizeInBits() / 8);
+    Value *allocSize =
+        ConstantInt::get(Type::getInt64Ty(*theContext), payloadBytes);
+    rawData = builder->CreateCall(mallocFunc, {allocSize}, "asyncdata");
+    Value *doubleData = builder->CreateBitCast(rawData, ptrTy, "doubledata");
+
+    for (std::size_t i = 0; i < argValues.size(); ++i) {
+      // Write each argument into the heap payload in call order.
+      Value *index = ConstantInt::get(Type::getInt64Ty(*theContext),
+                                      static_cast<uint64_t>(i));
+      Value *argPtr =
+          builder->CreateInBoundsGEP(doubleTy, doubleData, index, "argptr");
+      builder->CreateStore(argValues[i], argPtr);
+    }
   }
 
+  // Build a wrapper that knows how to unpack the payload and call calleeF.
+  Function *wrapperFunc = createAsyncWrapper(calleeF, argValues.size());
+
+  // Hand the wrapper and payload pointer off to the runtime entry
+  // point, which will queue them on the worker pool.
   FunctionType *helperType = FunctionType::get(
-      Type::getDoubleTy(*theContext), helperArgs, false);
-  std::string helperName = "__compiler_async_" + std::to_string(args.size());
-  Function *helperFunc = getOrCreateRuntimeFunction(helperName, helperType);
+      Type::getDoubleTy(*theContext), {wrapperFunc->getType(), ptrTy}, false);
+  Function *helperFunc =
+      getOrCreateRuntimeFunction("__compiler_async_call", helperType);
   if (!helperFunc) {
-    return logErrorV(("Runtime function signature mismatch: " + helperName).c_str());
+    return logErrorV(
+        "Runtime function signature mismatch: __compiler_async_call");
   }
 
-  return builder->CreateCall(helperFunc, asyncArgs, "asynctmp");
+  return builder->CreateCall(helperFunc, {wrapperFunc, rawData}, "asynctmp");
 }
 
 Function *PrototypeAST::codegen() {

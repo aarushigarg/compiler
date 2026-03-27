@@ -96,7 +96,7 @@ Quick reminders:
 - `for i = 1, i < 10 in i` is also valid; the step expression is optional
 - `var x in ...` is valid; omitted initializers default to `0.0`
 - custom binary operators default to precedence `30` if no number is provided
-- `async` currently only supports direct named function calls with up to 3 arguments
+- `async` currently only supports direct named function calls
 
 ## Grammar Overview
 
@@ -237,10 +237,10 @@ async printd(99)
 
 does not call `printd(99)` immediately on the current thread. Instead, the compiler lowers it to a runtime helper that:
 
-1. receives the function pointer and argument values
-2. packages them into a task
-3. pushes that task into a shared queue
-4. wakes a worker thread
+1. evaluates the argument expressions
+2. stores those values in a heap payload
+3. generates a wrapper function for that async site
+4. passes the wrapper and payload pointer to the runtime
 5. returns immediately to the caller
 
 In the current language implementation, `async ...` returns `0.0`. The async task's useful effect is side effects or eventual completion, not returning a value back into the source language.
@@ -261,13 +261,9 @@ This means that if you want a function to guarantee that all async work it start
 The compiler does not implement threads directly in the parser or AST. Instead:
 
 - `sync()` lowers to the runtime symbol `__compiler_sync_tasks`
-- `async f(...)` lowers to one of:
-  - `__compiler_async_0`
-  - `__compiler_async_1`
-  - `__compiler_async_2`
-  - `__compiler_async_3`
-
-The helper is chosen by the number of arguments in the source call.
+- `async f(...)` lowers to the runtime symbol `__compiler_async_call`
+- the compiler generates a private wrapper function and a heap payload
+- the wrapper unpacks the payload, calls the original function, and frees the payload memory when the task finishes
 
 Example:
 
@@ -278,8 +274,39 @@ async printd(99)
 is lowered conceptually to:
 
 ```cpp
-__compiler_async_1(printd, 99.0);
+__compiler_async_call(__compiler_async_wrapper_N, payload_ptr);
 ```
+
+The wrapper exists because the runtime only knows how to execute one generic task shape:
+
+```cpp
+void task(void *data)
+```
+
+but source-language functions have many different signatures such as `double(double)` or `double(double, double, double)`. The wrapper adapts the generic runtime ABI to the real callee signature.
+
+The payload uses heap allocation instead of stack allocation because async work may outlive the current function call. A stack allocation created in the caller would be invalid once that caller returned.
+
+### Async code flow
+
+For a source expression like:
+
+```text
+async printd(99)
+```
+
+the current implementation follows this flow:
+
+1. The parser builds an `AsyncExprAST` with callee `printd` and one argument expression `99`.
+2. Codegen resolves `printd` to an LLVM function.
+3. Codegen evaluates `99` and stores it in a heap payload.
+4. Codegen generates a wrapper function with the generic shape `void wrapper(void *data)`.
+5. That wrapper casts the payload back to the expected layout, loads the argument values, calls `printd`, and frees the heap payload.
+6. Codegen emits a call to `__compiler_async_call(wrapper, payload_ptr)`.
+7. The runtime enqueues that `(wrapper, payload_ptr)` pair onto the worker pool.
+8. A worker thread later runs `wrapper(payload_ptr)`.
+9. When the task completes, the runtime decrements its pending task count.
+10. `sync()` blocks until that pending task count reaches `0`.
 
 ### Worker-pool design
 
@@ -316,14 +343,13 @@ Those are implemented in C++ in `runtime.cpp`, and the generated object file lin
 The async/sync support is intentionally small and concrete:
 
 - `async` only supports direct named function calls
-- `async` currently supports up to 3 arguments
 - all values are still `double`
 - async return values are not propagated back into the language
 - `sync()` waits for all outstanding async tasks in the process-wide runtime
 - there is no task handle, future, or per-task join yet
 - there is no closure/environment capture support yet
 
-These limits keep the ABI(Application Binary Interface) and runtime understandable.
+These limits keep the ABI (Application Binary Interface) and runtime understandable.
 
 ## Tokens and Keywords
 

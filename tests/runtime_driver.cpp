@@ -47,6 +47,7 @@ double useprintd(double);
 double loopnostep();
 double usesync();
 double useasync();
+double useasync4();
 }
 
 int main() {
@@ -71,6 +72,7 @@ int main() {
   checkClose("loopnostep", loopnostep(), 0.0);
   checkClose("usesync", usesync(), 1.0);
   checkClose("useasync", useasync(), 0.0);
+  checkClose("useasync4", useasync4(), 0.0);
 
   if (failures != 0) {
     std::fprintf(stderr, "%d correctness check(s) failed\n", failures);

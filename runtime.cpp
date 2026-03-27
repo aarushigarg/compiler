@@ -122,28 +122,8 @@ extern "C" double __compiler_sync_tasks() {
   return 0.0;
 }
 
-extern "C" double __compiler_async_0(double (*func)()) {
-  // Queue a zero-argument call.
-  getRuntime().enqueue([func] { func(); });
-  return 0.0;
-}
-
-extern "C" double __compiler_async_1(double (*func)(double), double arg0) {
-  // Queue a one-argument call.
-  getRuntime().enqueue([func, arg0] { func(arg0); });
-  return 0.0;
-}
-
-extern "C" double __compiler_async_2(double (*func)(double, double),
-                                     double arg0, double arg1) {
-  // Queue a two-argument call.
-  getRuntime().enqueue([func, arg0, arg1] { func(arg0, arg1); });
-  return 0.0;
-}
-
-extern "C" double __compiler_async_3(double (*func)(double, double, double),
-                                     double arg0, double arg1, double arg2) {
-  // Queue a three-argument call.
-  getRuntime().enqueue([func, arg0, arg1, arg2] { func(arg0, arg1, arg2); });
+extern "C" double __compiler_async_call(void (*task)(void *), void *data) {
+  // Runtime entry point for async
+  getRuntime().enqueue([task, data] { task(data); });
   return 0.0;
 }
