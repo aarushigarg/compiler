@@ -1,0 +1,9 @@
+extern burn(x)
+
+def serialburn(limit)
+  for i = 0, i < limit, 1 in
+    burn(i)
+
+def parallelburn(limit)
+  parfor i = 0, limit, 1 in
+    burn(i)

@@ -83,6 +83,9 @@ int gettok() {
     if (identifierStr == "for") {
       return tok_for;
     }
+    if (identifierStr == "parfor") {
+      return tok_parfor;
+    }
     if (identifierStr == "in") {
       return tok_in;
     }

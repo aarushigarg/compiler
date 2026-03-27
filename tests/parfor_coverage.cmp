@@ -1,0 +1,26 @@
+extern recordvalue(x)
+
+def parforcount()
+  parfor i = 0, 8, 1 in
+    recordvalue(i)
+
+def parfordefaultstep()
+  parfor i = 0, 3 in
+    recordvalue(i)
+
+def parforstep()
+  parfor i = 2, 10, 2 in
+    recordvalue(i)
+
+def parforcapture(base)
+  parfor i = 0, 4, 1 in
+    recordvalue(base + i)
+
+def parfornested()
+  parfor i = 0, 3, 1 in
+    parfor j = 0, 2, 1 in
+      recordvalue(i * 10 + j)
+
+def parforempty()
+  parfor i = 5, 5, 1 in
+    recordvalue(i)

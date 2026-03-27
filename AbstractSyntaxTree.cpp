@@ -14,9 +14,11 @@
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Verifier.h"
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace llvm;
@@ -102,6 +104,12 @@ public:
 
 DebugInfo debugInfo;
 std::size_t asyncWrapperCounter = 0;
+std::size_t parForWrapperCounter = 0;
+
+struct CapturedBinding {
+  std::string name;
+  Value *value = nullptr;
+};
 
 } // namespace
 
@@ -207,6 +215,123 @@ static Function *createAsyncWrapper(Function *calleeF, std::size_t argCount) {
   wrapperBuilder.CreateCall(freeFunc, rawData);
   wrapperBuilder.CreateRetVoid();
   verifyFunction(*wrapperFunc);
+  return wrapperFunc;
+}
+
+static Function *
+createParForWrapper(const std::string &varName, ExprAST *body,
+                    const std::vector<CapturedBinding> &captures,
+                    StructType *payloadTy, SourceLocation loc) {
+  PointerType *ptrTy = PointerType::get(*theContext, 0);
+  Type *doubleTy = Type::getDoubleTy(*theContext);
+  Type *indexTy = Type::getInt64Ty(*theContext);
+  // Each parfor wrapper has the runtime shape:
+  // void wrapper(void *data, std::size_t begin, std::size_t end).
+  FunctionType *wrapperType = FunctionType::get(
+      Type::getVoidTy(*theContext), {ptrTy, indexTy, indexTy}, false);
+  std::string wrapperName =
+      "__compiler_parfor_wrapper_" + std::to_string(parForWrapperCounter++);
+  Function *wrapperFunc = Function::Create(
+      wrapperType, Function::PrivateLinkage, wrapperName, theModule.get());
+
+  DISubprogram *subprogram = debugInfo.diBuilder->createFunction(
+      debugInfo.unit, wrapperName, StringRef(), debugInfo.unit, loc.line,
+      debugInfo.createFunctionType(0), loc.line, DINode::FlagArtificial,
+      DISubprogram::SPFlagDefinition);
+  wrapperFunc->setSubprogram(subprogram);
+
+  auto savedIP = builder->saveIP();
+  auto savedBindings = namedValues;
+  debugInfo.lexicalBlocks.push_back(subprogram);
+
+  BasicBlock *entryBB = BasicBlock::Create(*theContext, "entry", wrapperFunc);
+  BasicBlock *loopBB = BasicBlock::Create(*theContext, "parfor.loop", wrapperFunc);
+  BasicBlock *afterBB =
+      BasicBlock::Create(*theContext, "parfor.after", wrapperFunc);
+  builder->SetInsertPoint(entryBB);
+  debugInfo.emitLocation(nullptr);
+
+  auto argIter = wrapperFunc->arg_begin();
+  Value *rawData = argIter++;
+  rawData->setName("rawdata");
+  Value *beginIndex = argIter++;
+  beginIndex->setName("begin");
+  Value *endIndex = argIter++;
+  endIndex->setName("end");
+
+  // The payload stores the evaluated start and step values followed by any
+  // captured locals that the loop body references.
+  Value *payloadData =
+      builder->CreateBitCast(rawData, PointerType::get(*theContext, 0),
+                             "payload");
+  Value *startPtr = builder->CreateStructGEP(payloadTy, payloadData, 0, "start.ptr");
+  Value *stepPtr = builder->CreateStructGEP(payloadTy, payloadData, 1, "step.ptr");
+  Value *startVal = builder->CreateLoad(doubleTy, startPtr, "start");
+  Value *stepVal = builder->CreateLoad(doubleTy, stepPtr, "step");
+
+  // Recreate the captured lexical environment inside the wrapper so body
+  // codegen can resolve names just like it does in the enclosing function.
+  namedValues.clear();
+  Function *func = wrapperFunc;
+  for (std::size_t i = 0; i < captures.size(); ++i) {
+    AllocaInst *alloca = createEntryBlockAlloca(func, captures[i].name);
+    Value *fieldPtr = builder->CreateStructGEP(payloadTy, payloadData,
+                                               static_cast<unsigned>(i + 2),
+                                               captures[i].name + ".ptr");
+    Value *capturedVal =
+        builder->CreateLoad(doubleTy, fieldPtr, captures[i].name + ".value");
+    builder->CreateStore(capturedVal, alloca);
+    namedValues[captures[i].name] = alloca;
+  }
+
+  AllocaInst *loopVarAlloca = createEntryBlockAlloca(func, varName);
+  namedValues[varName] = loopVarAlloca;
+
+  // Skip the loop entirely when this chunk covers no iterations.
+  Value *hasWork = builder->CreateICmpULT(beginIndex, endIndex, "haswork");
+  builder->CreateCondBr(hasWork, loopBB, afterBB);
+
+  builder->SetInsertPoint(loopBB);
+  PHINode *indexPhi = builder->CreatePHI(indexTy, 2, "parfor.index");
+  indexPhi->addIncoming(beginIndex, entryBB);
+
+  // Convert the chunk-local integer index back into the source-language loop
+  // value: start + index * step.
+  Value *indexAsDouble =
+      builder->CreateUIToFP(indexPhi, doubleTy, "parfor.index.double");
+  Value *scaledIndex =
+      builder->CreateFMul(indexAsDouble, stepVal, "parfor.index.step");
+  Value *loopValue = builder->CreateFAdd(startVal, scaledIndex, varName);
+  builder->CreateStore(loopValue, loopVarAlloca);
+
+  // Run the source-language body once for this iteration.
+  debugInfo.emitLocation(body);
+  if (!body->codegen()) {
+    debugInfo.lexicalBlocks.pop_back();
+    namedValues = std::move(savedBindings);
+    builder->restoreIP(savedIP);
+    wrapperFunc->eraseFromParent();
+    return nullptr;
+  }
+
+  BasicBlock *bodyBB = builder->GetInsertBlock();
+  // Advance to the next iteration in the assigned chunk.
+  Value *nextIndex =
+      builder->CreateAdd(indexPhi,
+                         ConstantInt::get(indexTy, static_cast<uint64_t>(1)),
+                         "parfor.next");
+  Value *continueCond =
+      builder->CreateICmpULT(nextIndex, endIndex, "parfor.cond");
+  builder->CreateCondBr(continueCond, loopBB, afterBB);
+  indexPhi->addIncoming(nextIndex, bodyBB);
+
+  builder->SetInsertPoint(afterBB);
+  builder->CreateRetVoid();
+
+  verifyFunction(*wrapperFunc);
+  debugInfo.lexicalBlocks.pop_back();
+  namedValues = std::move(savedBindings);
+  builder->restoreIP(savedIP);
   return wrapperFunc;
 }
 
@@ -451,6 +576,111 @@ Value *ForExprAST::codegen() {
   debugInfo.lexicalBlocks.pop_back();
 
   return Constant::getNullValue(Type::getDoubleTy(*theContext));
+}
+
+Value *ParForExprAST::codegen() {
+  debugInfo.emitLocation(this);
+
+  Function *mallocFunc = getOrCreateMallocFunction();
+  if (!mallocFunc) {
+    return logErrorV("Could not declare malloc");
+  }
+
+  Function *freeFunc = getOrCreateFreeFunction();
+  if (!freeFunc) {
+    return logErrorV("Could not declare free");
+  }
+
+  // Evaluate the loop bounds once in the caller before launching parallel
+  // work, so each chunk sees the same start/end/step values.
+  Value *startVal = startExpr->codegen();
+  if (!startVal) {
+    return nullptr;
+  }
+
+  Value *endVal = endExpr->codegen();
+  if (!endVal) {
+    return nullptr;
+  }
+
+  Value *stepVal = nullptr;
+  if (stepExpr) {
+    stepVal = stepExpr->codegen();
+    if (!stepVal) {
+      return nullptr;
+    }
+  } else {
+    stepVal = ConstantFP::get(*theContext, APFloat(1.0));
+  }
+
+  // Capture the currently visible locals by value. The parfor body runs later
+  // on worker threads, so it cannot rely on stack storage in the caller.
+  std::vector<CapturedBinding> captures;
+  captures.reserve(namedValues.size());
+  Type *doubleTy = Type::getDoubleTy(*theContext);
+  for (const auto &binding : namedValues) {
+    if (!binding.second) {
+      continue;
+    }
+    Value *capturedVal =
+        builder->CreateLoad(doubleTy, binding.second, binding.first + ".capture");
+    captures.push_back({binding.first, capturedVal});
+  }
+
+  std::vector<Type *> payloadFields(2 + captures.size(), doubleTy);
+  StructType *payloadTy =
+      StructType::create(*theContext, payloadFields, "parfor.payload");
+  Function *wrapperFunc =
+      createParForWrapper(varName, body.get(), captures, payloadTy, getLoc());
+  if (!wrapperFunc) {
+    return nullptr;
+  }
+
+  // Materialize the payload on the heap so it stays valid for all scheduled
+  // chunks until the runtime finishes the parallel loop.
+  uint64_t payloadBytes =
+      static_cast<uint64_t>(payloadFields.size()) *
+      (doubleTy->getPrimitiveSizeInBits() / 8);
+  Value *allocSize =
+      ConstantInt::get(Type::getInt64Ty(*theContext), payloadBytes);
+  Value *rawData = builder->CreateCall(mallocFunc, {allocSize}, "parfordata");
+  Value *payloadData =
+      builder->CreateBitCast(rawData, PointerType::get(*theContext, 0),
+                             "payload");
+
+  Value *startPtr = builder->CreateStructGEP(payloadTy, payloadData, 0, "start.ptr");
+  Value *stepPtr = builder->CreateStructGEP(payloadTy, payloadData, 1, "step.ptr");
+  builder->CreateStore(startVal, startPtr);
+  builder->CreateStore(stepVal, stepPtr);
+
+  for (std::size_t i = 0; i < captures.size(); ++i) {
+    Value *fieldPtr = builder->CreateStructGEP(payloadTy, payloadData,
+                                               static_cast<unsigned>(i + 2),
+                                               captures[i].name + ".ptr");
+    builder->CreateStore(captures[i].value, fieldPtr);
+  }
+
+  // Hand the wrapper and payload to the runtime, which partitions the
+  // iteration space into chunks and waits for them before returning.
+  FunctionType *helperType =
+      FunctionType::get(doubleTy,
+                        {wrapperFunc->getType(), PointerType::get(*theContext, 0),
+                         doubleTy, doubleTy, doubleTy},
+                        false);
+  Function *helperFunc =
+      getOrCreateRuntimeFunction("__compiler_parfor", helperType);
+  if (!helperFunc) {
+    return logErrorV("Runtime function signature mismatch: __compiler_parfor");
+  }
+
+  Value *result = builder->CreateCall(helperFunc,
+                                      {wrapperFunc, rawData, startVal, endVal,
+                                       stepVal},
+                                      "parfortmp");
+  // The runtime returns only after all chunks complete, so the payload can be
+  // released immediately after the helper call.
+  builder->CreateCall(freeFunc, {rawData});
+  return result;
 }
 
 Value *CallExprAST::codegen() {

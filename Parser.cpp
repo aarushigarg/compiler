@@ -32,6 +32,7 @@ std::unique_ptr<ExprAST> parseExpression();
 std::unique_ptr<ExprAST> parseVarExpr();
 std::unique_ptr<ExprAST> parseSyncExpr();
 std::unique_ptr<ExprAST> parseAsyncExpr();
+std::unique_ptr<ExprAST> parseParForExpr();
 
 // numberexpr ::= number
 std::unique_ptr<ExprAST> parseNumberExpr() {
@@ -188,6 +189,64 @@ std::unique_ptr<ExprAST> parseForExpr() {
                                       std::move(body), forLoc);
 }
 
+// parforexpr ::= 'parfor' identifier '=' expr ',' expr (',' expr)? 'in'
+//                expression
+std::unique_ptr<ExprAST> parseParForExpr() {
+  SourceLocation parForLoc = curLoc;
+  getNextToken(); // eat parfor
+
+  if (curTok != tok_identifier) {
+    return logError("expected identifier after parfor");
+  }
+
+  std::string idName = identifierStr;
+  getNextToken(); // eat identifier
+
+  if (curTok != '=') {
+    return logError("expected '=' after parfor");
+  }
+  getNextToken(); // eat '='
+
+  auto startExpr = parseExpression();
+  if (!startExpr) {
+    return nullptr;
+  }
+
+  if (curTok != ',') {
+    return logError("expected ',' after parfor start value");
+  }
+  getNextToken();
+
+  auto endExpr = parseExpression();
+  if (!endExpr) {
+    return nullptr;
+  }
+
+  std::unique_ptr<ExprAST> stepExpr;
+  if (curTok == ',') {
+    getNextToken();
+    stepExpr = parseExpression();
+    if (!stepExpr) {
+      return nullptr;
+    }
+  }
+
+  if (curTok != tok_in) {
+    return logError("expected 'in' after parfor");
+  }
+  getNextToken(); // eat in
+
+  auto body = parseExpression();
+  if (!body) {
+    return nullptr;
+  }
+
+  return std::make_unique<ParForExprAST>(idName, std::move(startExpr),
+                                         std::move(endExpr),
+                                         std::move(stepExpr), std::move(body),
+                                         parForLoc);
+}
+
 // primary
 //  ::= identifierexpr
 //  ::= numberexpr
@@ -207,6 +266,8 @@ std::unique_ptr<ExprAST> parsePrimary() {
     return parseIfExpr();
   case tok_for:
     return parseForExpr();
+  case tok_parfor:
+    return parseParForExpr();
   case tok_var:
     return parseVarExpr();
   case tok_sync:

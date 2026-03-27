@@ -1,8 +1,0 @@
-def accumulate(limit)
-  var total = 0 in
-    for i = 1, i < limit, 1 in
-      var total = total + i in
-        total
-
-def main()
-  accumulate(6)

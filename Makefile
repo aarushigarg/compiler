@@ -2,15 +2,15 @@ CC := $(shell brew --prefix llvm)/bin/clang++
 LLVM_CXXFLAGS := $(shell llvm-config --cxxflags)
 LLVM_LDFLAGS := $(shell llvm-config --ldflags --system-libs --libs all)
 
-CXXFLAGS := -std=c++17 -g -O3 $(LLVM_CXXFLAGS) -Iinclude
-TEST_CXXFLAGS := -std=c++17 -g -O3
+CXXFLAGS := -std=c++17 -O3 $(LLVM_CXXFLAGS) -Iinclude
+TEST_CXXFLAGS := -std=c++17 -O3
 COMPILER_SOURCES := Main.cpp Lexer.cpp Parser.cpp AbstractSyntaxTree.cpp LogErrors.cpp
 TARGET := main
 RUNTIME_OBJECT := runtime.o
 PROGRAM ?=
 PROGRAM_OBJECT := $(patsubst %.cmp,%.o,$(PROGRAM))
 
-.PHONY: all clean run test test-driver
+.PHONY: all clean run test test-parfor benchmark-parfor
 
 all: $(TARGET)
 
@@ -25,16 +25,24 @@ run: $(TARGET) $(RUNTIME_OBJECT)
 
 test: $(TARGET) $(RUNTIME_OBJECT)
 	./$(TARGET) tests/full_coverage.cmp
-	$(CC) $(TEST_CXXFLAGS) tests/test_driver.cpp tests/full_coverage.o $(RUNTIME_OBJECT) -lm -o runtime_tests
+	$(CC) $(TEST_CXXFLAGS) tests/full_coverage.cpp tests/full_coverage.o $(RUNTIME_OBJECT) -lm -o runtime_tests
 	./runtime_tests
+	./$(TARGET) tests/parfor_coverage.cmp
+	$(CC) $(TEST_CXXFLAGS) tests/parfor_test_driver.cpp tests/parfor_coverage.o $(RUNTIME_OBJECT) -lm -o parfor_runtime_tests
+	./parfor_runtime_tests
 
-test-driver: $(TARGET) $(RUNTIME_OBJECT)
-	./$(TARGET) tests/program.cmp
-	$(CC) $(TEST_CXXFLAGS) tools/driver.cpp tests/program.o $(RUNTIME_OBJECT) -lm -o program_runner
-	./program_runner
+test-parfor: $(TARGET) $(RUNTIME_OBJECT)
+	./$(TARGET) tests/parfor_coverage.cmp
+	$(CC) $(TEST_CXXFLAGS) tests/parfor_test_driver.cpp tests/parfor_coverage.o $(RUNTIME_OBJECT) -lm -o parfor_runtime_tests
+	./parfor_runtime_tests
+
+benchmark-parfor: $(TARGET) $(RUNTIME_OBJECT)
+	./$(TARGET) tests/parfor_benchmark.cmp
+	$(CC) $(TEST_CXXFLAGS) tests/parfor_benchmark.cpp tests/parfor_benchmark.o $(RUNTIME_OBJECT) -lm -o parfor_benchmark
+	./parfor_benchmark
 
 $(RUNTIME_OBJECT): runtime.cpp
 	$(CC) $(TEST_CXXFLAGS) -c runtime.cpp -o $(RUNTIME_OBJECT)
 
 clean:
-	rm -f $(TARGET) runtime_tests program_runner *.o tests/*.o
+	rm -f $(TARGET) runtime_tests parfor_runtime_tests parfor_benchmark program_runner *.o tests/*.o

@@ -8,8 +8,9 @@ runtime in `runtime.cpp`.
 
 There are two supported usage patterns in this repository:
 
-- library-style linking through `tests/test_driver.cpp`
+- library-style linking through `tests/full_coverage.cpp`
 - program-style linking through `tools/driver.cpp`
+- benchmark-style linking through `tests/parfor_benchmark.cpp`
 
 ## Requirements
 
@@ -72,8 +73,15 @@ make test
 This:
 
 1. compiles `tests/full_coverage.cmp`
-2. links the result with `tests/test_driver.cpp` and `runtime.cpp`
+2. links the result with `tests/full_coverage.cpp` and `runtime.cpp`
 3. executes native correctness checks
+4. compiles and runs the dedicated `parfor` correctness harness
+
+Run only the `parfor` correctness checks:
+
+```sh
+make test-parfor
+```
 
 ### Program-style driver flow
 
@@ -87,12 +95,6 @@ def main()
 Run the built-in program-style test:
 
 ```sh
-make test-driver
-```
-
-Run any program file through the standard driver:
-
-```sh
 make run PROGRAM=path/to/file.cmp
 ```
 
@@ -101,6 +103,20 @@ This:
 1. compiles the `.cmp` file to an object file
 2. links it with `tools/driver.cpp` and `runtime.cpp`
 3. executes the generated program entrypoint
+
+### Benchmark flow
+
+Run the parallel loop benchmark:
+
+```sh
+make benchmark-parfor
+```
+
+This:
+
+1. compiles `tests/parfor_benchmark.cmp`
+2. links it with `tests/parfor_benchmark.cpp` and `runtime.cpp`
+3. reports sequential versus parallel runtime for the benchmark workload
 
 ## Source Structure Rules
 
@@ -208,6 +224,22 @@ The step expression is optional:
 for i = 1, i < 10 in
   i
 ```
+
+Parallel loop example:
+
+```text
+parfor i = 0, 8, 1 in
+  printd(i)
+```
+
+Behavior:
+
+- `parfor` evaluates the start, end, and step expressions once
+- the end bound is exclusive
+- the step defaults to `1.0`
+- the step must be greater than `0`
+- `parfor` returns `0.0`
+- iteration order is not specified
 
 ### Local bindings
 
@@ -318,8 +350,7 @@ prototype ::= identifier '(' identifier* ')'
 ## Useful Files
 
 - `tests/full_coverage.cmp`
-- `tests/test_driver.cpp`
-- `tests/program.cmp`
+- `tests/full_coverage.cpp`
 - `tools/driver.cpp`
 - `runtime.cpp`
 
@@ -337,16 +368,10 @@ Run library-style tests:
 make test
 ```
 
-Run program-style driver test:
-
-```sh
-make test-driver
-```
-
 Run any program file:
 
 ```sh
-make run PROGRAM=tests/program.cmp
+make run PROGRAM=path/to/file.cmp
 ```
 
 Clean generated artifacts:

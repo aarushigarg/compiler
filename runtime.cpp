@@ -1,5 +1,8 @@
+#include <algorithm>
+#include <cmath>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdio>
 #include <functional>
 #include <mutex>
 #include <queue>
@@ -106,6 +109,60 @@ public:
     // Wait until no tasks remain.
     workFinished.wait(lock, [this] { return pendingTasks == 0; });
   }
+
+  std::size_t workerCount() const { return workers.size(); }
+
+  void parallelFor(void (*task)(void *, std::size_t, std::size_t), void *data,
+                   double start, double end, double step) {
+    if (!(step > 0.0)) {
+      std::fprintf(stderr, "Error: parfor step must be greater than 0\n");
+      return;
+    }
+    if (!std::isfinite(start) || !std::isfinite(end) || !std::isfinite(step)) {
+      std::fprintf(stderr, "Error: parfor bounds must be finite\n");
+      return;
+    }
+    if (!(end > start)) {
+      return;
+    }
+
+    double span = end - start;
+    std::size_t iterations =
+        static_cast<std::size_t>(std::ceil(span / step));
+    if (iterations == 0) {
+      return;
+    }
+
+    std::size_t desiredChunks = std::max<std::size_t>(1, workerCount() * 4);
+    std::size_t chunkCount = std::min(iterations, desiredChunks);
+    std::size_t grainSize = (iterations + chunkCount - 1) / chunkCount;
+
+    struct CompletionGroup {
+      std::mutex mutex;
+      std::condition_variable finished;
+      std::size_t pending = 0;
+    } group;
+
+    for (std::size_t begin = 0; begin < iterations; begin += grainSize) {
+      std::size_t chunkEnd = std::min(iterations, begin + grainSize);
+      {
+        std::lock_guard<std::mutex> lock(group.mutex);
+        ++group.pending;
+      }
+
+      enqueue([task, data, begin, chunkEnd, &group] {
+        task(data, begin, chunkEnd);
+        std::lock_guard<std::mutex> lock(group.mutex);
+        --group.pending;
+        if (group.pending == 0) {
+          group.finished.notify_all();
+        }
+      });
+    }
+
+    std::unique_lock<std::mutex> lock(group.mutex);
+    group.finished.wait(lock, [&group] { return group.pending == 0; });
+  }
 };
 
 AsyncRuntime &getRuntime() {
@@ -125,5 +182,12 @@ extern "C" double __compiler_sync_tasks() {
 extern "C" double __compiler_async_call(void (*task)(void *), void *data) {
   // Runtime entry point for async
   getRuntime().enqueue([task, data] { task(data); });
+  return 0.0;
+}
+
+extern "C" double __compiler_parfor(
+    void (*task)(void *, std::size_t, std::size_t), void *data, double start,
+    double end, double step) {
+  getRuntime().parallelFor(task, data, start, end, step);
   return 0.0;
 }

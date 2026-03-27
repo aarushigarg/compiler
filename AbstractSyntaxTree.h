@@ -115,6 +115,24 @@ public:
   Value *codegen() override;
 };
 
+class ParForExprAST : public ExprAST {
+  std::string varName;
+  std::unique_ptr<ExprAST> startExpr;
+  std::unique_ptr<ExprAST> endExpr;
+  std::unique_ptr<ExprAST> stepExpr;
+  std::unique_ptr<ExprAST> body;
+
+public:
+  ParForExprAST(const std::string &varName, std::unique_ptr<ExprAST> startExpr,
+                std::unique_ptr<ExprAST> endExpr,
+                std::unique_ptr<ExprAST> stepExpr,
+                std::unique_ptr<ExprAST> body, SourceLocation loc)
+      : ExprAST(loc), varName(varName), startExpr(std::move(startExpr)),
+        endExpr(std::move(endExpr)), stepExpr(std::move(stepExpr)),
+        body(std::move(body)) {}
+  Value *codegen() override;
+};
+
 // Function calls (CallExpr is industry standard for this case)
 class CallExprAST : public ExprAST {
   std::string callee;

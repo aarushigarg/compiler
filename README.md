@@ -5,8 +5,8 @@ LLVM.
 
 The compiler parses `.cmp` source files, lowers them to LLVM IR, and emits
 native object files. Generated code links against a C++ runtime that provides
-language-level `async` and `sync()` support through a worker-pool execution
-model.
+language-level `async`, `sync()`, and `parfor` support through a worker-pool
+execution model.
 
 ## What It Does
 
@@ -17,7 +17,7 @@ The project covers the full path from source code to native object output:
 - native object-file emission
 - language features such as functions, conditionals, loops, scoped locals, and
   custom operators
-- async task scheduling and barrier synchronization
+- async task scheduling, barrier synchronization, and parallel loop execution
 - native integration through both a general program driver and a direct test
   harness
 
@@ -31,17 +31,22 @@ The compiler reads a source file, builds an AST, and lowers that AST to LLVM
 IR. The output is a native object file that can be linked like any other
 compiled object.
 
-### Async runtime
+### Parallel runtime
 
 The runtime in [runtime.cpp](runtime.cpp) provides the execution support for
-`async` and `sync()`. Async call sites are lowered into runtime task
-submissions, and `sync()` acts as a barrier over outstanding work.
+`async`, `sync()`, and `parfor`. Async call sites are lowered into runtime task
+submissions, `sync()` acts as a barrier over outstanding work, and `parfor`
+launches chunked loop work over the shared worker pool.
+
+In one local benchmark run of the `parfor` workload, the benchmark harness
+reported `49.819 ms` for the sequential version and `6.788 ms` for the
+parallel version, for a measured `7.34x` speedup.
 
 ### Native execution paths
 
 The generated object files are used in two ways:
 
-- [tests/test_driver.cpp](tests/test_driver.cpp) links against generated functions directly for correctness testing
+- [tests/full_coverage.cpp](tests/full_coverage.cpp) links against generated functions directly for correctness testing
 - [tools/driver.cpp](tools/driver.cpp) runs a compiled language `main` through the lowered symbol `__program_main`
 
 ## Language
@@ -55,6 +60,7 @@ The language currently supports:
 - user-defined unary and binary operators
 - `if ... then ... else ...`
 - `for ... in`
+- `parfor ... in`
 - `var ... in`
 - `async functionName(...)`
 - `sync()`
@@ -80,8 +86,8 @@ The main workflows are:
 ```sh
 make
 make test
-make test-driver
-make run PROGRAM=tests/program.cmp
+make benchmark-parfor
+make run PROGRAM=path/to/file.cmp
 ```
 
 ## More Detail

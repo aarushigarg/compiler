@@ -31,6 +31,7 @@ enum token {
   tok_var = -13,
   tok_sync = -14,
   tok_async = -15,
+  tok_parfor = -16,
 };
 
 extern int curTok;                // Current token
