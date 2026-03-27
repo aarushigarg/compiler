@@ -86,3 +86,7 @@ for j = 1, j < 3 in
 
 def usesync()
   sync() + 1
+
+def useasync()
+  var ignored = async printd(99) in
+    sync() + ignored

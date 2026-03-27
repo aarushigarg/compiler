@@ -32,6 +32,7 @@ int getTokPrecedence() {
 std::unique_ptr<ExprAST> parseExpression();
 std::unique_ptr<ExprAST> parseVarExpr();
 std::unique_ptr<ExprAST> parseSyncExpr();
+std::unique_ptr<ExprAST> parseAsyncExpr();
 
 // numberexpr ::= number
 std::unique_ptr<ExprAST> parseNumberExpr() {
@@ -217,6 +218,8 @@ std::unique_ptr<ExprAST> parsePrimary() {
     return parseVarExpr();
   case tok_sync:
     return parseSyncExpr();
+  case tok_async:
+    return parseAsyncExpr();
   default:
     return logError("unknown token when expecting an expression");
   }
@@ -476,6 +479,46 @@ std::unique_ptr<ExprAST> parseSyncExpr() {
   getNextToken(); // eat ')'
 
   return std::make_unique<SyncExprAST>(syncLoc);
+}
+
+std::unique_ptr<ExprAST> parseAsyncExpr() {
+  devPrintf("Parser: parseAsyncExpr\n");
+  SourceLocation asyncLoc = curLoc;
+  getNextToken(); // eat async
+
+  if (curTok != tok_identifier) {
+    return logError("expected identifier after async");
+  }
+
+  std::string callee = identifierStr;
+  getNextToken(); // eat identifier
+
+  if (curTok != '(') {
+    return logError("expected '(' after async callee");
+  }
+  getNextToken(); // eat '('
+
+  std::vector<std::unique_ptr<ExprAST>> args;
+  if (curTok != ')') {
+    while (true) {
+      auto arg = parseExpression();
+      if (!arg) {
+        return nullptr;
+      }
+      args.push_back(std::move(arg));
+
+      if (curTok == ')') {
+        break;
+      }
+      if (curTok != ',') {
+        return logError("expected ')' or ',' in async argument list");
+      }
+      getNextToken(); // eat ','
+    }
+  }
+
+  getNextToken(); // eat ')'
+  return std::make_unique<AsyncExprAST>(callee, std::move(args), asyncLoc);
 }
 
 } // namespace Compiler

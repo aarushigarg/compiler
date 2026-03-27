@@ -89,6 +89,10 @@ static void devLogToken(int tok) {
     devPrintf("Lexer: tok_sync\n");
     return;
   }
+  if (tok == tok_async) {
+    devPrintf("Lexer: tok_async\n");
+    return;
+  }
   if (tok > 0 && std::isprint(tok)) {
     devPrintf("Lexer: '%c'\n", tok);
     return;
@@ -172,6 +176,10 @@ int gettok() {
     if (identifierStr == "sync") {
       devLogToken(tok_sync);
       return tok_sync;
+    }
+    if (identifierStr == "async") {
+      devLogToken(tok_async);
+      return tok_async;
     }
     devLogToken(tok_identifier);
     return tok_identifier;

@@ -46,6 +46,7 @@ double callexterns(double);
 double useprintd(double);
 double loopnostep();
 double usesync();
+double useasync();
 }
 
 int main() {
@@ -69,6 +70,7 @@ int main() {
   checkClose("useprintd", useprintd(42.0), 42.0);
   checkClose("loopnostep", loopnostep(), 0.0);
   checkClose("usesync", usesync(), 1.0);
+  checkClose("useasync", useasync(), 0.0);
 
   if (failures != 0) {
     std::fprintf(stderr, "%d correctness check(s) failed\n", failures);

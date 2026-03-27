@@ -30,6 +30,7 @@ enum token {
   tok_in = -12,
   tok_var = -13,
   tok_sync = -14,
+  tok_async = -15,
 };
 
 extern int curTok;                // Current token

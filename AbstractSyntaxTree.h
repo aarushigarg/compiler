@@ -133,6 +133,17 @@ public:
   Value *codegen() override;
 };
 
+class AsyncExprAST : public ExprAST {
+  std::string callee;
+  std::vector<std::unique_ptr<ExprAST>> args;
+
+public:
+  AsyncExprAST(std::string &callee, std::vector<std::unique_ptr<ExprAST>> args,
+               SourceLocation loc)
+      : ExprAST(loc), callee(callee), args(std::move(args)) {}
+  Value *codegen() override;
+};
+
 // Prototype of a function
 // Captures name and argument names
 // (thus implicitly the number of arguments the function takes)

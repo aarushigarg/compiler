@@ -427,10 +427,54 @@ Value *SyncExprAST::codegen() {
   Function *syncFunc =
       getOrCreateRuntimeFunction("__compiler_sync_tasks", syncType);
   if (!syncFunc) {
-    return logErrorV("Runtime function signature mismatch: __compiler_sync_tasks");
+    return logErrorV(
+        "Runtime function signature mismatch: __compiler_sync_tasks");
   }
 
   return builder->CreateCall(syncFunc, {}, "synctmp");
+}
+
+Value *AsyncExprAST::codegen() {
+  debugInfo.emitLocation(this);
+  devPrintf("Codegen: async\n");
+
+  Function *calleeF = getFunction(callee);
+  if (!calleeF) {
+    return logErrorV(("Unknown function referenced in async: " + callee).c_str());
+  }
+  if (calleeF->arg_size() != args.size()) {
+    return logErrorV("Incorrect number of arguments passed to async");
+  }
+  if (args.size() > 3) {
+    return logErrorV("async currently supports up to 3 arguments");
+  }
+
+  std::vector<Value *> asyncArgs;
+  asyncArgs.push_back(calleeF);
+
+  for (auto &arg : args) {
+    Value *argVal = arg->codegen();
+    if (!argVal) {
+      return nullptr;
+    }
+    asyncArgs.push_back(argVal);
+  }
+
+  std::vector<Type *> helperArgs;
+  helperArgs.push_back(calleeF->getType());
+  for (std::size_t i = 0; i < args.size(); ++i) {
+    helperArgs.push_back(Type::getDoubleTy(*theContext));
+  }
+
+  FunctionType *helperType = FunctionType::get(
+      Type::getDoubleTy(*theContext), helperArgs, false);
+  std::string helperName = "__compiler_async_" + std::to_string(args.size());
+  Function *helperFunc = getOrCreateRuntimeFunction(helperName, helperType);
+  if (!helperFunc) {
+    return logErrorV(("Runtime function signature mismatch: " + helperName).c_str());
+  }
+
+  return builder->CreateCall(helperFunc, asyncArgs, "asynctmp");
 }
 
 Function *PrototypeAST::codegen() {

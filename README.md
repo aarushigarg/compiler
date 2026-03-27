@@ -1,6 +1,6 @@
 # Compiler
 
-This project is a small LLVM-based compiler for an expression-oriented language. It parses source code into an AST, lowers it to LLVM IR, and emits an object file.
+This project is a small LLVM-based compiler for an expression-oriented language. It parses source code into an AST, lowers it to LLVM IR, and emits an object file. The generated code can be linked against a small C++ runtime that provides asynchronous task execution through a general worker-pool design.
 
 ## Requirements
 
@@ -15,6 +15,8 @@ brew install llvm
 ```
 
 ## Build
+
+Build the compiler:
 
 ```sh
 make
@@ -71,14 +73,15 @@ The compiler currently supports:
 - `if ... then ... else ...`
 - `for ... in` loops
 - `var ... in` local bindings
-- `sync()` runtime barrier expression
+- `async` task scheduling expressions
+- `sync()` barrier expressions
 - User-defined unary operators
 - User-defined binary operators with custom precedence
 - `#` line comments
 - Optional debug logging and LLVM IR dumps
 - Debug metadata emission into the generated object file
 
-## Syntax Guide
+## Quick Syntax Guide
 
 If you just want the most common source forms, start here:
 
@@ -89,16 +92,20 @@ add(1, 2)
 if x < y then x else y
 for i = 1, i < 10, 1 in i * 2
 var a = 1, b = 2 in a + b
+async printd(42)
 sync()
 def unary!(x) 0 - x
 def binary% 50 (x y) x - y
 ```
 
-Notes:
+Quick reminders:
 
 - `for i = 1, i < 10 in i` is also valid; the step expression is optional
 - `var x in ...` is valid; omitted initializers default to `0.0`
 - custom binary operators default to precedence `30` if no number is provided
+- `async` currently only supports direct named function calls with up to 3 arguments
+
+## Grammar Overview
 
 ### How to read the grammar
 
@@ -118,14 +125,6 @@ top ::= definition
      | expression
 ```
 
-Examples:
-
-```text
-def add(x y) x + y
-extern sin(x)
-add(1, 2)
-```
-
 ### Expressions
 
 An expression starts from a unary expression and may continue with binary operators according to precedence rules.
@@ -139,6 +138,7 @@ primary ::= identifierexpr
           | ifexpr
           | forexpr
           | varexpr
+          | asyncexpr
           | syncexpr
 ```
 
@@ -148,6 +148,7 @@ Examples:
 42
 x
 (a + b) * 2
+async printd(42)
 sync()
 ```
 
@@ -163,14 +164,6 @@ identifierexpr ::= identifier
                  | identifier '(' expression (',' expression)* ')'
 ```
 
-Examples:
-
-```text
-radius
-sin(angle)
-add(1, 2)
-```
-
 ### Control flow
 
 The language supports `if` expressions and `for` expressions. Both produce values like any other expression.
@@ -184,16 +177,6 @@ forexpr ::= 'for' identifier '=' expression ','
             'in' expression
 ```
 
-The third expression in a `for` loop is the optional step value.
-
-Examples:
-
-```text
-if x < y then x else y
-for i = 1, i < 10, 1 in i * 2
-for i = 1, i < 10 in i
-```
-
 ### Local variables
 
 A `var` expression introduces one or more local bindings, then evaluates a body expression after `in`.
@@ -201,11 +184,7 @@ A `var` expression introduces one or more local bindings, then evaluates a body 
 ```text
 varexpr ::= 'var' identifier ('=' expression)?
             (',' identifier ('=' expression)?)* 'in' expression
-
-syncexpr ::= 'sync' '(' ')'
 ```
-
-If a binding has no initializer, it defaults to `0.0`.
 
 Examples:
 
@@ -213,8 +192,33 @@ Examples:
 var a = 1 in a + 2
 var a = 1, b = 2 in a + b
 var x, y = 3 in x + y
-sync()
+var ignored = async printd(99) in
+  sync() + ignored
 ```
+
+### Async and sync
+
+The current task-parallel syntax is:
+
+```text
+asyncexpr ::= 'async' identifier '(' expression (',' expression)* ')'
+syncexpr  ::= 'sync' '(' ')'
+```
+
+Examples:
+
+```text
+async printd(99)
+sync()
+
+var ignored = async printd(99) in
+  sync() + ignored
+```
+
+Meaning:
+
+- `async f(args...)` schedules `f(args...)` to run on the runtime worker pool
+- `sync()` blocks until all outstanding async work has finished
 
 ### Function signatures
 
@@ -226,20 +230,107 @@ prototype ::= identifier '(' identifier* ')'
             | 'binary' ASCII number? '(' identifier identifier ')'
 ```
 
-Examples:
+## Async/Sync Runtime
+
+This project includes a native runtime in [`runtime.cpp`](/runtime.cpp). The compiler lowers high-level `async` and `sync()` expressions into calls to runtime entry points implemented in C++.
+
+### What `async` does
+
+`async` is a scheduling operation, not a normal function call. For example:
 
 ```text
-add(x y)
-unary!(x)
-binary% 50 (x y)
-binary^ (x y)
+async printd(99)
 ```
 
-Notes:
+does not call `printd(99)` immediately on the current thread. Instead, the compiler lowers it to a runtime helper that:
 
-- `identifier*` means zero or more parameter names
-- `number?` after a binary operator means operator precedence is optional
-- if no precedence is given for a custom binary operator, the parser uses `30`
+1. receives the function pointer and argument values
+2. packages them into a task
+3. pushes that task into a shared queue
+4. wakes a worker thread
+5. returns immediately to the caller
+
+In the current language implementation, `async ...` returns `0.0`. The async task's useful effect is side effects or eventual completion, not returning a value back into the source language.
+
+### What `sync()` does
+
+`sync()` is a barrier. It blocks until the runtime's count of outstanding tasks reaches zero.
+
+In other words:
+
+- `async` schedules work
+- `sync()` waits for that work to complete
+
+This means that if you want a function to guarantee that all async work it started has finished before returning, that function should call `sync()` before it completes.
+
+### How the compiler lowers async/sync
+
+The compiler does not implement threads directly in the parser or AST. Instead:
+
+- `sync()` lowers to the runtime symbol `__compiler_sync_tasks`
+- `async f(...)` lowers to one of:
+  - `__compiler_async_0`
+  - `__compiler_async_1`
+  - `__compiler_async_2`
+  - `__compiler_async_3`
+
+The helper is chosen by the number of arguments in the source call.
+
+Example:
+
+```text
+async printd(99)
+```
+
+is lowered conceptually to:
+
+```cpp
+__compiler_async_1(printd, 99.0);
+```
+
+### Worker-pool design
+
+The runtime uses a general worker-pool pattern:
+
+- a shared queue stores pending tasks
+- a fixed set of worker threads repeatedly pulls tasks from that queue
+- a mutex protects the queue and bookkeeping state
+- one condition variable wakes workers when new work arrives
+- another condition variable lets `sync()` sleep until all tasks are finished
+
+Each `async` expression creates exactly one queued task in the current implementation.
+
+The runtime tracks a `pendingTasks` counter:
+
+- enqueueing a task increments the counter
+- finishing a task decrements the counter
+- `sync()` waits until the counter reaches `0`
+
+### Why a C++ runtime is needed
+
+This separation between compiler and runtime is standard. The compiler can describe asynchronous work in LLVM IR, but the actual thread management requires native support for:
+
+- worker threads
+- mutexes
+- condition variables
+- queues
+- shutdown/join behavior
+
+Those are implemented in C++ in `runtime.cpp`, and the generated object file links against `runtime.o`.
+
+### Runtime limitations
+
+The async/sync support is intentionally small and concrete:
+
+- `async` only supports direct named function calls
+- `async` currently supports up to 3 arguments
+- all values are still `double`
+- async return values are not propagated back into the language
+- `sync()` waits for all outstanding async tasks in the process-wide runtime
+- there is no task handle, future, or per-task join yet
+- there is no closure/environment capture support yet
+
+These limits keep the ABI(Application Binary Interface) and runtime understandable.
 
 ## Tokens and Keywords
 
@@ -255,20 +346,10 @@ Recognized keywords:
 - `for`
 - `in`
 - `var`
+- `async`
 - `sync`
 
 Comments start with `#` and continue to the end of the line.
-
-## Runtime Support
-
-The compiler can emit calls to helper functions that are implemented outside
-the source language in [`runtime.cpp`](/runtime.cpp).
-
-`sync()` currently lowers to the runtime symbol `__compiler_sync_tasks`. The
-runtime implementation is a stub for now, so `sync()` behaves like a no-op
-expression that returns `0.0`. This runtime boundary is still important
-because the future `spawn` implementation will use the same mechanism to call
-into a thread pool and synchronization primitives written in C++.
 
 ## Debug Mode
 
@@ -286,7 +367,7 @@ COMPILER_DEV=1 ./main --file tests/full_coverage.cmp
 
 Debug mode traces lexer/parser/codegen activity and prints generated LLVM IR for parsed functions.
 
-## Test Input
+## Tests
 
 The repository includes [`tests/full_coverage.cmp`](/tests/full_coverage.cmp), a source file designed to exercise the implemented language features end to end.
 
@@ -308,14 +389,13 @@ Run both with:
 make test
 ```
 
-`test-correctness` compiles `tests/full_coverage.cmp` to `tests/full_coverage.o`, links it with [`tests/runtime_driver.cpp`](/tests/runtime_driver.cpp), and executes runtime assertions against the generated code.
+`test-correctness` compiles `tests/full_coverage.cmp` to `tests/full_coverage.o`, links it with [`tests/runtime_driver.cpp`](/tests/runtime_driver.cpp) and [`runtime.cpp`](/runtime.cpp), then executes runtime assertions against the generated code.
 
-## Notes and Limitations
+## General Project Constraints
 
 - Input can come from either `stdin` or `--file <path>`.
 - `--stdin` writes `output.o`; `--file path/to/file.cmp` writes `path/to/file.o`.
 - All values are compiled as `double`.
-- The compiler emits an object file but does not link an executable.
+- The compiler emits an object file but does not link a standalone executable by itself.
 - Whitespace, including spaces, tabs, and newlines, is treated as a separator and is mostly only needed to keep tokens from running together.
 - The lexer accepts only alphanumeric identifier characters after the first letter.
-- The parser installs built-in precedences only for `<`, `+`, `-`, and `*`.
