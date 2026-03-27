@@ -2,6 +2,7 @@
 
 #include "SourceLocation.h"
 
+#include <cstdio>
 #include <string>
 
 namespace Compiler {
@@ -34,6 +35,9 @@ extern int curTok;                // Current token
 extern std::string identifierStr; // Contains value if tok_identifier
 extern double numVal;             // Contains value if tok_number
 extern SourceLocation curLoc;     // Source location of current token
+
+void setInputFile(FILE *inputFile);
+void resetLexerState();
 
 int gettok();
 int getNextToken();

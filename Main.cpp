@@ -14,14 +14,22 @@
 #include "llvm/TargetParser/Host.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <optional>
+#include <string>
 #include <system_error>
 
 namespace Compiler {
 
 extern std::map<char, int> binopPrecedence;
 
-void initializeModule();
+struct InputConfig {
+  FILE *stream = stdin;
+  std::string sourceName = "stdin";
+  bool interactive = true;
+};
+
+void initializeModule(const std::string &sourceName);
 bool emitObjectFile(const std::string &filename);
 
 void handleDefinition() {
@@ -61,7 +69,7 @@ void handleTopLevelExpression() {
   }
 }
 
-void initializeModule() {
+void initializeModule(const std::string &sourceName) {
   theContext = std::make_unique<LLVMContext>();
   theModule = std::make_unique<Module>("Compiler", *theContext);
   theModule->addModuleFlag(llvm::Module::Warning, "Debug Info Version",
@@ -70,10 +78,10 @@ void initializeModule() {
     theModule->addModuleFlag(llvm::Module::Warning, "Dwarf Version", 2);
   }
   builder = std::make_unique<IRBuilder<>>(*theContext);
-  initializeDebugInfo("stdin.ks");
+  initializeDebugInfo(sourceName);
 }
 
-void setup() {
+void setup(const InputConfig &config) {
   // Install standard binary operators
   // 1 is lowest precedence
   binopPrecedence['<'] = 10;
@@ -81,12 +89,16 @@ void setup() {
   binopPrecedence['-'] = 20;
   binopPrecedence['*'] = 40; // highest
 
-  // Prime the first token
-  fprintf(stderr, "ready> ");
-  getNextToken();
+  setInputFile(config.stream);
 
   // Initialize
-  initializeModule();
+  initializeModule(config.sourceName);
+
+  // Prime the first token
+  if (config.interactive) {
+    fprintf(stderr, "ready> ");
+  }
+  getNextToken();
 }
 
 bool emitObjectFile(const std::string &filename) {
@@ -139,16 +151,13 @@ bool emitObjectFile(const std::string &filename) {
   return true;
 }
 
-// top ::= definition | external | expression | ';'
-void mainLoop() {
-  setup();
+// top ::= definition | external | expression
+void mainLoop(const InputConfig &config) {
+  setup(config);
   while (true) {
     switch (curTok) {
     case tok_eof:
       return;
-    case ';':
-      getNextToken();
-      break;
     case tok_def:
       handleDefinition();
       break;
@@ -160,16 +169,60 @@ void mainLoop() {
       break;
     }
     // Prompt after each completed action
-    fprintf(stderr, "ready> ");
+    if (config.interactive) {
+      fprintf(stderr, "ready> ");
+    }
   }
+}
+
+InputConfig parseInputConfig(int argc, char **argv) {
+  InputConfig config;
+
+  for (int i = 1; i < argc; ++i) {
+    std::string arg = argv[i];
+    if (arg == "--dev" || arg == "-d") {
+      continue;
+    }
+    if (arg == "--stdin") {
+      config.stream = stdin;
+      config.sourceName = "stdin";
+      config.interactive = true;
+      continue;
+    }
+    if (arg == "--file") {
+      if (i + 1 >= argc) {
+        fprintf(stderr, "Error: missing path after --file\n");
+        std::exit(1);
+      }
+      const char *path = argv[++i];
+      FILE *file = fopen(path, "r");
+      if (!file) {
+        perror(path);
+        std::exit(1);
+      }
+      config.stream = file;
+      config.sourceName = path;
+      config.interactive = false;
+      continue;
+    }
+
+    fprintf(stderr, "Error: unknown argument '%s'\n", arg.c_str());
+    std::exit(1);
+  }
+
+  return config;
 }
 
 } // namespace Compiler
 
 int main(int argc, char **argv) {
   Compiler::initDevModeFromArgs(argc, argv);
+  Compiler::InputConfig inputConfig = Compiler::parseInputConfig(argc, argv);
   // Run the main "interpreter loop"
-  Compiler::mainLoop();
+  Compiler::mainLoop(inputConfig);
+  if (inputConfig.stream != stdin) {
+    fclose(inputConfig.stream);
+  }
   if (!Compiler::emitObjectFile("output.o")) {
     return 1;
   }

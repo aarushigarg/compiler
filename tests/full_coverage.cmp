@@ -1,0 +1,85 @@
+# Full language coverage test for the compiler implementation.
+# This file is intended to exercise lexing, parsing, AST construction,
+# code generation, operator handling, control flow, scoping, comments,
+# extern declarations, and top-level expressions.
+
+extern sin(x)
+extern cos(x)
+extern printd(x)
+extern binary: 5 (x y)
+
+def identity(x) x
+def add(x y) x + y
+def sub(x y) x - y
+def mul(x y) x * y
+def less(x y) x < y
+def grouped(x y) (x + y) * (x - y)
+def choose(flag x y) if flag then x else y
+def unary!(x) 0 - x
+def unary-(x) 0 - x
+def binary^ (x y) x + y
+def binary% 60 (x y) x * y + x
+def binary@ 15 (x y) x < y
+
+def withvar(a b)
+  var x = a,
+      y = b,
+      z
+  in x + y + z
+
+def shadowtest(n)
+  var x = n in
+    var x = x + 1 in
+      x
+
+def countdown(n)
+  for i = n, i, -1 in
+    i
+
+def accumulate(limit)
+  var total = 0 in
+    for i = 1, i < limit, 1 in
+      var total = total + i in
+        total
+
+def usecustomops(a b)
+  (!a) % b @ a
+
+def usecaret(a b c)
+  a * b ^ c
+
+def useexterncolon(a b)
+  a : b
+
+def callexterns(x)
+  sin(x) + cos(x)
+
+def useprintd(x)
+  printd(x)
+
+def loopnostep()
+  for j = 1, j < 3 in
+    j * 2
+
+identity(1)
+add(2, 3)
+sub(8, 5)
+mul(4, 6)
+less(1, 2)
+1 : 2
+3 ^ 4
+grouped(9, 3)
+choose(1, 10, 20)
+withvar(7, 8)
+shadowtest(5)
+countdown(4)
+accumulate(6)
+usecustomops(3, 2)
+callexterns(0.5)
+printd(add(40, 2))
+
+var outer = 10, inner = outer * 2 in
+  if inner < 25 then inner else outer
+
+for j = 1, j < 3 in
+  j * 2

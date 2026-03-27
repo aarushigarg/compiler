@@ -14,9 +14,11 @@ double numVal;
 SourceLocation curLoc = {1, 1};
 
 static SourceLocation lexLoc = {1, 0};
+static FILE *input = stdin;
+static int lastChar = ' ';
 
 static int advance() {
-  int nextChar = getchar();
+  int nextChar = getc(input);
   if (nextChar == '\n' || nextChar == '\r') {
     ++lexLoc.line;
     lexLoc.col = 0;
@@ -90,10 +92,22 @@ static void devLogToken(int tok) {
   devPrintf("Lexer: token %d\n", tok);
 }
 
-// Return the next token from stdin
-int gettok() {
-  static int lastChar = ' ';
+void setInputFile(FILE *inputFile) {
+  input = inputFile ? inputFile : stdin;
+  resetLexerState();
+}
 
+void resetLexerState() {
+  lexLoc = {1, 0};
+  curLoc = {1, 1};
+  identifierStr.clear();
+  numVal = 0;
+  curTok = 0;
+  lastChar = ' ';
+}
+
+// Return the next token from the configured input stream
+int gettok() {
   // Skip whitespace
   while (isspace(lastChar)) {
     lastChar = advance();
