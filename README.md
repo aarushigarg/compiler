@@ -1,6 +1,6 @@
 # Compiler
 
-This project is a small LLVM-based compiler for an expression-oriented language. It parses source code into an AST, lowers it to LLVM IR, and emits an object file named `output.o`.
+This project is a small LLVM-based compiler for an expression-oriented language. It parses source code into an AST, lowers it to LLVM IR, and emits an object file.
 
 ## Requirements
 
@@ -54,7 +54,7 @@ This reads directly from a source file and runs without interactive prompts:
 ./main --file tests/full_coverage.cmp
 ```
 
-This always writes `output.o` in the project root when compilation succeeds.
+In file mode, the output object uses the input filename with an `.o` extension. For example, `tests/full_coverage.cmp` becomes `tests/full_coverage.o`.
 
 ## Language Features
 
@@ -289,11 +289,12 @@ Run both with:
 make test
 ```
 
-`test-correctness` compiles `tests/full_coverage.cmp` to `output.o`, links it with [`tests/runtime_driver.cpp`](/tests/runtime_driver.cpp), and executes runtime assertions against the generated code.
+`test-correctness` compiles `tests/full_coverage.cmp` to `tests/full_coverage.o`, links it with [`tests/runtime_driver.cpp`](/tests/runtime_driver.cpp), and executes runtime assertions against the generated code.
 
 ## Notes and Limitations
 
 - Input can come from either `stdin` or `--file <path>`.
+- `--stdin` writes `output.o`; `--file path/to/file.cmp` writes `path/to/file.o`.
 - All values are compiled as `double`.
 - The compiler emits an object file but does not link an executable.
 - Whitespace, including spaces, tabs, and newlines, is treated as a separator and is mostly only needed to keep tokens from running together.

@@ -26,11 +26,22 @@ extern std::map<char, int> binopPrecedence;
 struct InputConfig {
   FILE *stream = stdin;
   std::string sourceName = "stdin";
+  std::string outputName = "output.o";
   bool interactive = true;
 };
 
 void initializeModule(const std::string &sourceName);
 bool emitObjectFile(const std::string &filename);
+
+std::string makeOutputFilename(const std::string &sourceName) {
+  std::size_t lastSlash = sourceName.find_last_of("/\\");
+  std::size_t lastDot = sourceName.find_last_of('.');
+  if (lastDot == std::string::npos ||
+      (lastSlash != std::string::npos && lastDot < lastSlash)) {
+    return sourceName + ".o";
+  }
+  return sourceName.substr(0, lastDot) + ".o";
+}
 
 void handleDefinition() {
   if (auto funcAST = parseDefinition()) {
@@ -186,6 +197,7 @@ InputConfig parseInputConfig(int argc, char **argv) {
     if (arg == "--stdin") {
       config.stream = stdin;
       config.sourceName = "stdin";
+      config.outputName = "output.o";
       config.interactive = true;
       continue;
     }
@@ -202,6 +214,7 @@ InputConfig parseInputConfig(int argc, char **argv) {
       }
       config.stream = file;
       config.sourceName = path;
+      config.outputName = makeOutputFilename(path);
       config.interactive = false;
       continue;
     }
@@ -223,7 +236,7 @@ int main(int argc, char **argv) {
   if (inputConfig.stream != stdin) {
     fclose(inputConfig.stream);
   }
-  if (!Compiler::emitObjectFile("output.o")) {
+  if (!Compiler::emitObjectFile(inputConfig.outputName)) {
     return 1;
   }
 
