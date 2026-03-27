@@ -23,10 +23,9 @@ namespace Compiler {
 extern std::map<char, int> binopPrecedence;
 
 struct InputConfig {
-  FILE *stream = stdin;
-  std::string sourceName = "stdin";
-  std::string outputName = "output.o";
-  bool interactive = true;
+  FILE *stream = nullptr;
+  std::string sourceName;
+  std::string outputName;
 };
 
 void initializeModule(const std::string &sourceName);
@@ -100,9 +99,6 @@ void setup(const InputConfig &config) {
   initializeModule(config.sourceName);
 
   // Prime the first token
-  if (config.interactive) {
-    fprintf(stderr, "ready> ");
-  }
   getNextToken();
 }
 
@@ -173,47 +169,26 @@ void mainLoop(const InputConfig &config) {
       handleTopLevelExpression();
       break;
     }
-    // Prompt after each completed action
-    if (config.interactive) {
-      fprintf(stderr, "ready> ");
-    }
   }
 }
 
 InputConfig parseInputConfig(int argc, char **argv) {
-  InputConfig config;
-
-  for (int i = 1; i < argc; ++i) {
-    std::string arg = argv[i];
-    if (arg == "--stdin") {
-      config.stream = stdin;
-      config.sourceName = "stdin";
-      config.outputName = "output.o";
-      config.interactive = true;
-      continue;
-    }
-    if (arg == "--file") {
-      if (i + 1 >= argc) {
-        fprintf(stderr, "Error: missing path after --file\n");
-        std::exit(1);
-      }
-      const char *path = argv[++i];
-      FILE *file = fopen(path, "r");
-      if (!file) {
-        perror(path);
-        std::exit(1);
-      }
-      config.stream = file;
-      config.sourceName = path;
-      config.outputName = makeOutputFilename(path);
-      config.interactive = false;
-      continue;
-    }
-
-    fprintf(stderr, "Error: unknown argument '%s'\n", arg.c_str());
+  if (argc != 2) {
+    fprintf(stderr, "Usage: %s <source-file>\n", argv[0]);
     std::exit(1);
   }
 
+  InputConfig config;
+  const char *path = argv[1];
+  FILE *file = fopen(path, "r");
+  if (!file) {
+    perror(path);
+    std::exit(1);
+  }
+
+  config.stream = file;
+  config.sourceName = path;
+  config.outputName = makeOutputFilename(path);
   return config;
 }
 
@@ -223,7 +198,7 @@ int main(int argc, char **argv) {
   Compiler::InputConfig inputConfig = Compiler::parseInputConfig(argc, argv);
   // Run the main "interpreter loop"
   Compiler::mainLoop(inputConfig);
-  if (inputConfig.stream != stdin) {
+  if (inputConfig.stream) {
     fclose(inputConfig.stream);
   }
   if (!Compiler::emitObjectFile(inputConfig.outputName)) {

@@ -2,7 +2,7 @@
 
 LLVM-based compiler for an expression-oriented language with task-based `async`/`sync` support and a C++ worker-pool runtime.
 
-The compiler parses source code into an AST, lowers it to LLVM IR, emits an object file, and links cleanly against a native runtime that executes async work on background threads.
+The compiler parses source code into an AST, lowers it to LLVM IR, and emits an object file. Generated code links cleanly against a native runtime that executes async work on background threads.
 
 The language is still intentionally simple: every runtime value is currently represented as a `double`, which keeps the IR and async payload layout straightforward.
 
@@ -120,24 +120,12 @@ This produces the compiler executable `main`.
 ### Compile a source file
 
 ```sh
-./main --file tests/full_coverage.cmp
+./main tests/full_coverage.cmp
 ```
 
 That emits `tests/full_coverage.o`.
 
-The compiler stops at object-file generation. The test flow links that object against the runtime and driver code.
-
-### Interactive mode
-
-```sh
-make run
-```
-
-or:
-
-```sh
-./main --stdin
-```
+The compiler stops at object-file generation. To run generated code, link the emitted object with a native driver program and the async runtime.
 
 ## Tests
 
@@ -162,6 +150,16 @@ make test
 ```
 
 `test-correctness` compiles [`tests/full_coverage.cmp`](/tests/full_coverage.cmp) to `tests/full_coverage.o`, links it with [`tests/runtime_driver.cpp`](/tests/runtime_driver.cpp) and [`runtime.cpp`](/runtime.cpp), and executes runtime assertions against the generated code.
+
+## Compile And Run Flow
+
+The project is intentionally compile-only, similar to a traditional ahead-of-time C++ toolchain:
+
+1. `./main path/to/program.cmp` compiles a source file into `path/to/program.o`
+2. A native executable links that object with [`runtime.cpp`](/runtime.cpp)
+3. The native executable calls the generated functions and prints or checks results
+
+The repository's correctness tests use [`tests/runtime_driver.cpp`](/tests/runtime_driver.cpp) as that native driver.
 
 ## Language Reference
 
@@ -343,7 +341,7 @@ Comments start with `#` and continue to the end of the line.
 
 ## General Project Constraints
 
-- Input can come from either `stdin` or `--file <path>`
-- `--stdin` writes `output.o`; `--file path/to/file.cmp` writes `path/to/file.o`
+- The compiler accepts exactly one source file path as input
+- `path/to/file.cmp` writes `path/to/file.o`
 - Whitespace, including spaces, tabs, and newlines, is treated as a separator and is mostly only needed to keep tokens from running together
 - The lexer accepts only alphanumeric identifier characters after the first letter

@@ -14,32 +14,29 @@ TEST_RUNNER := runtime_tests
 RUNTIME_SOURCE := runtime.cpp
 RUNTIME_OBJECT := runtime.o
 
-.PHONY: all clean run test test-compile test-correctness
+.PHONY: all clean test test-compile test-correctness
 
 all: $(TARGET)
 
 $(TARGET): $(SOURCES)
 	$(CC) $(CXXFLAGS) $(SOURCES) $(LLVM_LDFLAGS) -o $@
 
-run: $(TARGET)
-	./$(TARGET)
-
 test: test-compile test-correctness
 
 test-compile: $(TEST_OBJECT)
 
 $(TEST_OBJECT): $(TARGET) $(TEST_SOURCE)
-	./$(TARGET) --file $(TEST_SOURCE)
+	./$(TARGET) $(TEST_SOURCE)
 
 $(TEST_RUNNER): $(TEST_OBJECT) $(TEST_DRIVER) $(RUNTIME_OBJECT)
 	$(CC) $(TEST_CXXFLAGS) $(TEST_DRIVER) $(TEST_OBJECT) $(RUNTIME_OBJECT) -lm -o $(TEST_RUNNER)
 
 test-correctness: $(TARGET) $(TEST_RUNNER)
-	./$(TARGET) --file $(TEST_SOURCE)
+	./$(TARGET) $(TEST_SOURCE)
 	./$(TEST_RUNNER)
 
 $(RUNTIME_OBJECT): $(RUNTIME_SOURCE)
 	$(CC) $(TEST_CXXFLAGS) -c $(RUNTIME_SOURCE) -o $(RUNTIME_OBJECT)
 
 clean:
-	rm -f $(TARGET) $(TEST_RUNNER) *.o
+	rm -f $(TARGET) $(TEST_RUNNER) *.o tests/*.o
