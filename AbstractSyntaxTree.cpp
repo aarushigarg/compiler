@@ -111,7 +111,20 @@ void initializeDebugInfo(const std::string &sourceName) {
 
 void finalizeDebugInfo() { debugInfo.finalize(); }
 
+std::string PrototypeAST::getSymbolName() const {
+  if (name == "main" && args.empty()) {
+    return "__program_main";
+  }
+  return name;
+}
+
 static Function *getFunction(const std::string &name) {
+  if (name == "main") {
+    if (auto *func = theModule->getFunction("__program_main")) {
+      return func;
+    }
+  }
+
   // Prefer existing definitions, then fall back to cached prototypes
   if (auto *func = theModule->getFunction(name)) {
     return func;
@@ -553,16 +566,17 @@ Function *PrototypeAST::codegen() {
   std::vector<Type *> Doubles(args.size(), Type::getDoubleTy(*theContext));
   FunctionType *funcType =
       FunctionType::get(Type::getDoubleTy(*theContext), Doubles, false);
+  std::string symbolName = getSymbolName();
 
   // Ensure existing function has matching signature
   Function *func;
-  if ((func = theModule->getFunction(name))) {
+  if ((func = theModule->getFunction(symbolName))) {
     if (func->getFunctionType() != funcType) {
       logErrorP("Function signature mismatch");
       return nullptr;
     }
   } else {
-    func = Function::Create(funcType, Function::ExternalLinkage, name,
+    func = Function::Create(funcType, Function::ExternalLinkage, symbolName,
                             theModule.get());
   }
 
@@ -577,7 +591,7 @@ Function *PrototypeAST::codegen() {
 
 Function *FunctionAST::codegen() {
   // First check for existing function from previous 'extern' declaration
-  Function *func = theModule->getFunction(prototype->getName());
+  Function *func = theModule->getFunction(prototype->getSymbolName());
 
   if (!func) {
     func = prototype->codegen();

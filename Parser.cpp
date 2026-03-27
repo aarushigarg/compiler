@@ -424,18 +424,6 @@ std::unique_ptr<FunctionAST> parseDefinition() {
   return nullptr;
 }
 
-// toplevelexpr ::= expression
-// Allows wrapping bare expression as a function to be handled unifromly later
-std::unique_ptr<FunctionAST> parseTopLevelExpr() {
-  if (auto expr = parseExpression()) {
-    auto prototype = std::make_unique<PrototypeAST>(
-        "__anon_expr", std::vector<std::string>(), false, 0, expr->getLoc());
-    return std::make_unique<FunctionAST>(std::move(prototype), std::move(expr));
-  }
-
-  return nullptr;
-}
-
 // external ::= 'extern' prototype
 std::unique_ptr<PrototypeAST> parseExtern() {
   getNextToken(); // eat extern

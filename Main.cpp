@@ -1,5 +1,6 @@
 #include "AbstractSyntaxTree.h"
 #include "Lexer.h"
+#include "LogErrors.h"
 #include "Parser.h"
 
 #include "llvm/IR/LegacyPassManager.h"
@@ -28,6 +29,10 @@ struct InputConfig {
   std::string outputName;
 };
 
+struct CompileStatus {
+  bool hasMain = false;
+};
+
 void initializeModule(const std::string &sourceName);
 bool emitObjectFile(const std::string &filename);
 
@@ -41,32 +46,10 @@ std::string makeOutputFilename(const std::string &sourceName) {
   return sourceName.substr(0, lastDot) + ".o";
 }
 
-void handleDefinition() {
-  if (auto funcAST = parseDefinition()) {
-    functionProtos[funcAST->getProto().getName()] = funcAST->getProto().clone();
-    funcAST->codegen();
-  } else {
-    // Skip token for error recovery
-    getNextToken();
-  }
-}
-
 void handleExtern() {
   if (auto protoAST = parseExtern()) {
     functionProtos[protoAST->getName()] = protoAST->clone();
     functionProtos[protoAST->getName()]->codegen();
-  } else {
-    // Skip token for error recovery
-    getNextToken();
-  }
-}
-
-void handleTopLevelExpression() {
-  // Parse and codegen anonymous top-level expression.
-  if (auto funcAST = parseTopLevelExpr()) {
-    if (auto *funcIR = funcAST->codegen()) {
-      funcIR->eraseFromParent();
-    }
   } else {
     // Skip token for error recovery
     getNextToken();
@@ -152,22 +135,38 @@ bool emitObjectFile(const std::string &filename) {
   return true;
 }
 
-// top ::= definition | external | expression
-void mainLoop(const InputConfig &config) {
+// top ::= definition | external
+void mainLoop(const InputConfig &config, CompileStatus &status) {
   setup(config);
   while (true) {
     switch (curTok) {
     case tok_eof:
       return;
     case tok_def:
-      handleDefinition();
+      if (auto funcAST = parseDefinition()) {
+        const PrototypeAST &proto = funcAST->getProto();
+        if (proto.getName() == "main") {
+          if (!proto.getArgs().empty()) {
+            logError("program entrypoint must be defined as def main()");
+          } else {
+            status.hasMain = true;
+          }
+        }
+        if (!hadError) {
+          functionProtos[proto.getName()] = proto.clone();
+          funcAST->codegen();
+        }
+      } else {
+        // Skip token for error recovery
+        getNextToken();
+      }
       break;
     case tok_extern:
       handleExtern();
       break;
     default:
-      handleTopLevelExpression();
-      break;
+      logError("top-level expressions are not allowed; wrap code in a function");
+      return;
     }
   }
 }
@@ -196,14 +195,21 @@ InputConfig parseInputConfig(int argc, char **argv) {
 
 int main(int argc, char **argv) {
   Compiler::InputConfig inputConfig = Compiler::parseInputConfig(argc, argv);
-  // Run the main "interpreter loop"
-  Compiler::mainLoop(inputConfig);
+  Compiler::CompileStatus compileStatus;
+  Compiler::hadError = false;
+  Compiler::mainLoop(inputConfig, compileStatus);
   if (inputConfig.stream) {
     fclose(inputConfig.stream);
+  }
+  if (Compiler::hadError) {
+    return 1;
   }
   if (!Compiler::emitObjectFile(inputConfig.outputName)) {
     return 1;
   }
+  llvm::outs() << "Entrypoint: "
+               << (compileStatus.hasMain ? "main found" : "no main function")
+               << '\n';
 
   return 0;
 }

@@ -167,6 +167,7 @@ public:
   }
   Function *codegen();
   const std::string &getName() const { return name; }
+  std::string getSymbolName() const;
   SourceLocation getLoc() const { return loc; }
   bool isUnaryOp() const { return isOperator && name.substr(0, 5) == "unary"; }
   bool isBinaryOp() const {

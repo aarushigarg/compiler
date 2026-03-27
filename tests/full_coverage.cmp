@@ -1,7 +1,7 @@
 # Full language coverage test for the compiler implementation.
 # This file is intended to exercise lexing, parsing, AST construction,
 # code generation, operator handling, control flow, scoping, comments,
-# extern declarations, and top-level expressions.
+# and extern declarations.
 
 extern sin(x)
 extern cos(x)
@@ -60,29 +60,6 @@ def useprintd(x)
 def loopnostep()
   for j = 1, j < 3 in
     j * 2
-
-identity(1)
-add(2, 3)
-sub(8, 5)
-mul(4, 6)
-less(1, 2)
-1 : 2
-3 ^ 4
-grouped(9, 3)
-choose(1, 10, 20)
-withvar(7, 8)
-shadowtest(5)
-countdown(4)
-accumulate(6)
-usecustomops(3, 2)
-callexterns(0.5)
-printd(add(40, 2))
-
-var outer = 10, inner = outer * 2 in
-  if inner < 25 then inner else outer
-
-for j = 1, j < 3 in
-  j * 2
 
 def usesync()
   sync() + 1
