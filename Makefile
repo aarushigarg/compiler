@@ -5,7 +5,7 @@ LLVM_LDFLAGS  := $(shell llvm-config --ldflags --system-libs --libs all)
 
 CXXFLAGS := -std=c++17 -g -O3 $(LLVM_CXXFLAGS) -Iinclude
 TEST_CXXFLAGS := -std=c++17 -g -O3
-SOURCES  := Main.cpp Lexer.cpp Parser.cpp AbstractSyntaxTree.cpp LogErrors.cpp Debug.cpp
+SOURCES  := Main.cpp Lexer.cpp Parser.cpp AbstractSyntaxTree.cpp LogErrors.cpp
 TARGET   := main
 TEST_SOURCE := tests/full_coverage.cmp
 TEST_OBJECT := tests/full_coverage.o
@@ -14,7 +14,7 @@ TEST_RUNNER := runtime_tests
 RUNTIME_SOURCE := runtime.cpp
 RUNTIME_OBJECT := runtime.o
 
-.PHONY: all clean run run-dev test test-compile test-correctness
+.PHONY: all clean run test test-compile test-correctness
 
 all: $(TARGET)
 
@@ -23,9 +23,6 @@ $(TARGET): $(SOURCES)
 
 run: $(TARGET)
 	./$(TARGET)
-
-run-dev: $(TARGET)
-	./$(TARGET) --dev
 
 test: test-compile test-correctness
 

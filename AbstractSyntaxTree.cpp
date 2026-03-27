@@ -1,6 +1,5 @@
 #include "AbstractSyntaxTree.h"
 
-#include "Debug.h"
 #include "LogErrors.h"
 
 #include "llvm/ADT/APFloat.h"
@@ -111,7 +110,6 @@ void initializeDebugInfo(const std::string &sourceName) {
 void finalizeDebugInfo() { debugInfo.finalize(); }
 
 static Function *getFunction(const std::string &name) {
-  devPrintf("Codegen: lookup function '%s'\n", name.c_str());
   // Prefer existing definitions, then fall back to cached prototypes
   if (auto *func = theModule->getFunction(name)) {
     return func;
@@ -147,13 +145,11 @@ static Function *getOrCreateRuntimeFunction(const std::string &name,
 
 Value *NumberExprAST::codegen() {
   debugInfo.emitLocation(this);
-  devPrintf("Codegen: number %f\n", val);
   return ConstantFP::get(*theContext, APFloat(val));
 }
 
 Value *VariableExprAST::codegen() {
   debugInfo.emitLocation(this);
-  devPrintf("Codegen: variable %s\n", name.c_str());
   // Look up variable name
   AllocaInst *V = namedValues[name];
   if (!V) {
@@ -164,7 +160,6 @@ Value *VariableExprAST::codegen() {
 
 Value *UnaryExprAST::codegen() {
   debugInfo.emitLocation(this);
-  devPrintf("Codegen: unary '%c'\n", op);
   Value *operandVal = operand->codegen();
   if (!operandVal) {
     return nullptr;
@@ -180,7 +175,6 @@ Value *UnaryExprAST::codegen() {
 
 Value *BinaryExprAST::codegen() {
   debugInfo.emitLocation(this);
-  devPrintf("Codegen: binary '%c'\n", op);
   Value *L = LHS->codegen();
   Value *R = RHS->codegen();
   if (!L || !R) {
@@ -213,7 +207,6 @@ Value *BinaryExprAST::codegen() {
 
 Value *VarExprAST::codegen() {
   debugInfo.emitLocation(this);
-  devPrintf("Codegen: var\n");
   std::vector<AllocaInst *> oldBindings;
 
   Function *func = builder->GetInsertBlock()->getParent();
@@ -272,7 +265,6 @@ Value *VarExprAST::codegen() {
 
 Value *IfExprAST::codegen() {
   debugInfo.emitLocation(this);
-  devPrintf("Codegen: if\n");
   // Convert condition to a boolean by comparing against 0.0
   Value *condVal = condExpr->codegen();
   if (!condVal) {
@@ -317,7 +309,6 @@ Value *IfExprAST::codegen() {
 
 Value *ForExprAST::codegen() {
   debugInfo.emitLocation(this);
-  devPrintf("Codegen: for %s\n", varName.c_str());
   // Emit the loop variable initialization
   Value *startVal = startExpr->codegen();
   if (!startVal) {
@@ -397,7 +388,6 @@ Value *ForExprAST::codegen() {
 
 Value *CallExprAST::codegen() {
   debugInfo.emitLocation(this);
-  devPrintf("Codegen: call %s (%zu args)\n", callee.c_str(), args.size());
   // Look up name in global module table
   Function *calleeF = getFunction(callee);
   if (!calleeF) {
@@ -420,7 +410,6 @@ Value *CallExprAST::codegen() {
 
 Value *SyncExprAST::codegen() {
   debugInfo.emitLocation(this);
-  devPrintf("Codegen: sync\n");
 
   FunctionType *syncType =
       FunctionType::get(Type::getDoubleTy(*theContext), false);
@@ -436,7 +425,6 @@ Value *SyncExprAST::codegen() {
 
 Value *AsyncExprAST::codegen() {
   debugInfo.emitLocation(this);
-  devPrintf("Codegen: async\n");
 
   Function *calleeF = getFunction(callee);
   if (!calleeF) {
@@ -478,7 +466,6 @@ Value *AsyncExprAST::codegen() {
 }
 
 Function *PrototypeAST::codegen() {
-  devPrintf("Codegen: prototype %s (%zu args)\n", name.c_str(), args.size());
   // Function with return type double and arguments of type double
   std::vector<Type *> Doubles(args.size(), Type::getDoubleTy(*theContext));
   FunctionType *funcType =
@@ -506,7 +493,6 @@ Function *PrototypeAST::codegen() {
 }
 
 Function *FunctionAST::codegen() {
-  devPrintf("Codegen: function %s\n", prototype->getName().c_str());
   // First check for existing function from previous 'extern' declaration
   Function *func = theModule->getFunction(prototype->getName());
 

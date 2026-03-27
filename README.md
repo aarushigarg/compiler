@@ -42,12 +42,6 @@ You can also select it explicitly:
 ./main --stdin
 ```
 
-Debug mode:
-
-```sh
-make run-dev
-```
-
 ### File mode
 
 This reads directly from a source file and runs without interactive prompts:
@@ -78,7 +72,6 @@ The compiler currently supports:
 - User-defined unary operators
 - User-defined binary operators with custom precedence
 - `#` line comments
-- Optional debug logging and LLVM IR dumps
 - Debug metadata emission into the generated object file
 
 ## Quick Syntax Guide
@@ -350,22 +343,6 @@ Recognized keywords:
 - `sync`
 
 Comments start with `#` and continue to the end of the line.
-
-## Debug Mode
-
-Enable debug logging with either:
-
-```sh
-./main --dev --file tests/full_coverage.cmp
-```
-
-or:
-
-```sh
-COMPILER_DEV=1 ./main --file tests/full_coverage.cmp
-```
-
-Debug mode traces lexer/parser/codegen activity and prints generated LLVM IR for parsed functions.
 
 ## Tests
 

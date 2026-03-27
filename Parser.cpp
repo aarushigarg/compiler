@@ -1,7 +1,6 @@
 #include "Parser.h"
 
 #include "AbstractSyntaxTree.h"
-#include "Debug.h"
 #include "Lexer.h"
 #include "LogErrors.h"
 
@@ -36,7 +35,6 @@ std::unique_ptr<ExprAST> parseAsyncExpr();
 
 // numberexpr ::= number
 std::unique_ptr<ExprAST> parseNumberExpr() {
-  devPrintf("Parser: parseNumberExpr\n");
   auto result = std::make_unique<NumberExprAST>(numVal, curLoc);
   getNextToken();
   return result;
@@ -44,7 +42,6 @@ std::unique_ptr<ExprAST> parseNumberExpr() {
 
 // parenexpr ::= '(' expression ')'
 std::unique_ptr<ExprAST> parseParenExpr() {
-  devPrintf("Parser: parseParenExpr\n");
   getNextToken(); // eat '('
   auto expr = parseExpression();
   if (!expr) {
@@ -62,7 +59,6 @@ std::unique_ptr<ExprAST> parseParenExpr() {
 //  ::= identifier
 //  ::= identifier '(' expression* ')'
 std::unique_ptr<ExprAST> parseIdentifierExpr() {
-  devPrintf("Parser: parseIdentifierExpr\n");
   SourceLocation idLoc = curLoc;
   std::string idName = identifierStr;
   getNextToken(); // eat identifier
@@ -101,7 +97,6 @@ std::unique_ptr<ExprAST> parseIdentifierExpr() {
 
 // ifexpr ::= 'if' expression 'then' expression 'else' expression
 std::unique_ptr<ExprAST> parseIfExpr() {
-  devPrintf("Parser: parseIfExpr\n");
   SourceLocation ifLoc = curLoc;
   // Parse conditional and both branches
   getNextToken(); // eat if
@@ -137,7 +132,6 @@ std::unique_ptr<ExprAST> parseIfExpr() {
 
 // forexpr ::= 'for' identifier '=' expr ',' expr (',' expr)? 'in' expression
 std::unique_ptr<ExprAST> parseForExpr() {
-  devPrintf("Parser: parseForExpr\n");
   SourceLocation forLoc = curLoc;
   getNextToken(); // eat for
 
@@ -202,7 +196,6 @@ std::unique_ptr<ExprAST> parseForExpr() {
 //  ::= forexpr
 //  ::= varexpr
 std::unique_ptr<ExprAST> parsePrimary() {
-  devPrintf("Parser: parsePrimary\n");
   switch (curTok) {
   case tok_identifier:
     return parseIdentifierExpr();
@@ -228,7 +221,6 @@ std::unique_ptr<ExprAST> parsePrimary() {
 // varexpr ::= 'var' identifier ('=' expression)?
 //             (',' identifier ('=' expression)?)* 'in' expression
 std::unique_ptr<ExprAST> parseVarExpr() {
-  devPrintf("Parser: parseVarExpr\n");
   SourceLocation varLoc = curLoc;
   getNextToken(); // eat var
 
@@ -281,7 +273,6 @@ std::unique_ptr<ExprAST> parseVarExpr() {
 //  ::= primary
 //  ::= '!' unary
 std::unique_ptr<ExprAST> parseUnary() {
-  devPrintf("Parser: parseUnary\n");
   // If the current token is not an operator, it must be a primary expression
   if (!isascii(curTok) || curTok == '(' || curTok == ',') {
     return parsePrimary();
@@ -302,7 +293,6 @@ std::unique_ptr<ExprAST> parseUnary() {
 //  ::= ('+' primary)*
 std::unique_ptr<ExprAST> parseBinOpRHS(int exprPrecedence,
                                        std::unique_ptr<ExprAST> LHS) {
-  devPrintf("Parser: parseBinOpRHS (precedence %d)\n", exprPrecedence);
   while (true) {
     int tokPrecedence = getTokPrecedence();
 
@@ -340,7 +330,6 @@ std::unique_ptr<ExprAST> parseBinOpRHS(int exprPrecedence,
 
 // expression ::= primary binoprhs
 std::unique_ptr<ExprAST> parseExpression() {
-  devPrintf("Parser: parseExpression\n");
   auto LHS = parseUnary();
   if (!LHS) {
     return nullptr;
@@ -354,7 +343,6 @@ std::unique_ptr<ExprAST> parseExpression() {
 //  ::= binary LETTER number? '(' id id ')'
 //  ::= unary LETTER '(' id ')'
 std::unique_ptr<PrototypeAST> parsePrototype() {
-  devPrintf("Parser: parsePrototype\n");
   std::string funcName;
   unsigned kind = 0;
   unsigned binaryPrecedence = 0;
@@ -417,7 +405,6 @@ std::unique_ptr<PrototypeAST> parsePrototype() {
 
 // definition ::= 'def' prototype expression
 std::unique_ptr<FunctionAST> parseDefinition() {
-  devPrintf("Parser: parseDefinition\n");
   getNextToken(); // eat def
 
   auto prototype = parsePrototype();
@@ -440,9 +427,7 @@ std::unique_ptr<FunctionAST> parseDefinition() {
 // toplevelexpr ::= expression
 // Allows wrapping bare expression as a function to be handled unifromly later
 std::unique_ptr<FunctionAST> parseTopLevelExpr() {
-  devPrintf("Parser: parseTopLevelExpr\n");
   if (auto expr = parseExpression()) {
-    devPrintf("Parser: create __anon_expr prototype\n");
     auto prototype = std::make_unique<PrototypeAST>(
         "__anon_expr", std::vector<std::string>(), false, 0, expr->getLoc());
     return std::make_unique<FunctionAST>(std::move(prototype), std::move(expr));
@@ -453,7 +438,6 @@ std::unique_ptr<FunctionAST> parseTopLevelExpr() {
 
 // external ::= 'extern' prototype
 std::unique_ptr<PrototypeAST> parseExtern() {
-  devPrintf("Parser: parseExtern\n");
   getNextToken(); // eat extern
   auto prototype = parsePrototype();
   if (prototype && prototype->isBinaryOp()) {
@@ -464,7 +448,6 @@ std::unique_ptr<PrototypeAST> parseExtern() {
 }
 
 std::unique_ptr<ExprAST> parseSyncExpr() {
-  devPrintf("Parser: parseSyncExpr\n");
   SourceLocation syncLoc = curLoc;
   getNextToken(); // eat sync
 
@@ -482,7 +465,6 @@ std::unique_ptr<ExprAST> parseSyncExpr() {
 }
 
 std::unique_ptr<ExprAST> parseAsyncExpr() {
-  devPrintf("Parser: parseAsyncExpr\n");
   SourceLocation asyncLoc = curLoc;
   getNextToken(); // eat async
 

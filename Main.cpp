@@ -1,5 +1,4 @@
 #include "AbstractSyntaxTree.h"
-#include "Debug.h"
 #include "Lexer.h"
 #include "Parser.h"
 
@@ -46,9 +45,7 @@ std::string makeOutputFilename(const std::string &sourceName) {
 void handleDefinition() {
   if (auto funcAST = parseDefinition()) {
     functionProtos[funcAST->getProto().getName()] = funcAST->getProto().clone();
-    if (auto *funcIR = funcAST->codegen()) {
-      devPrintIR("Read function definition: ", funcIR);
-    }
+    funcAST->codegen();
   } else {
     // Skip token for error recovery
     getNextToken();
@@ -58,9 +55,7 @@ void handleDefinition() {
 void handleExtern() {
   if (auto protoAST = parseExtern()) {
     functionProtos[protoAST->getName()] = protoAST->clone();
-    if (auto *funcIR = functionProtos[protoAST->getName()]->codegen()) {
-      devPrintIR("Read extern: ", funcIR);
-    }
+    functionProtos[protoAST->getName()]->codegen();
   } else {
     // Skip token for error recovery
     getNextToken();
@@ -71,7 +66,6 @@ void handleTopLevelExpression() {
   // Parse and codegen anonymous top-level expression.
   if (auto funcAST = parseTopLevelExpr()) {
     if (auto *funcIR = funcAST->codegen()) {
-      devPrintIR("Read top-level expression: ", funcIR);
       funcIR->eraseFromParent();
     }
   } else {
@@ -191,9 +185,6 @@ InputConfig parseInputConfig(int argc, char **argv) {
 
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
-    if (arg == "--dev" || arg == "-d") {
-      continue;
-    }
     if (arg == "--stdin") {
       config.stream = stdin;
       config.sourceName = "stdin";
@@ -229,7 +220,6 @@ InputConfig parseInputConfig(int argc, char **argv) {
 } // namespace Compiler
 
 int main(int argc, char **argv) {
-  Compiler::initDevModeFromArgs(argc, argv);
   Compiler::InputConfig inputConfig = Compiler::parseInputConfig(argc, argv);
   // Run the main "interpreter loop"
   Compiler::mainLoop(inputConfig);
