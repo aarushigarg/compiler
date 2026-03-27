@@ -77,9 +77,8 @@ class VarExprAST : public ExprAST {
   std::unique_ptr<ExprAST> body;
 
 public:
-  VarExprAST(
-      std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> vars,
-      std::unique_ptr<ExprAST> body, SourceLocation loc)
+  VarExprAST(std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> vars,
+             std::unique_ptr<ExprAST> body, SourceLocation loc)
       : ExprAST(loc), varNames(std::move(vars)), body(std::move(body)) {}
   Value *codegen() override;
 };
@@ -93,8 +92,8 @@ public:
   IfExprAST(std::unique_ptr<ExprAST> condExpr,
             std::unique_ptr<ExprAST> thenExpr,
             std::unique_ptr<ExprAST> elseExpr, SourceLocation loc)
-      : ExprAST(loc), condExpr(std::move(condExpr)), thenExpr(std::move(thenExpr)),
-        elseExpr(std::move(elseExpr)) {}
+      : ExprAST(loc), condExpr(std::move(condExpr)),
+        thenExpr(std::move(thenExpr)), elseExpr(std::move(elseExpr)) {}
   Value *codegen() override;
 };
 
@@ -108,8 +107,8 @@ class ForExprAST : public ExprAST {
 public:
   ForExprAST(const std::string &varName, std::unique_ptr<ExprAST> startExpr,
              std::unique_ptr<ExprAST> endExpr,
-             std::unique_ptr<ExprAST> stepExpr,
-             std::unique_ptr<ExprAST> body, SourceLocation loc)
+             std::unique_ptr<ExprAST> stepExpr, std::unique_ptr<ExprAST> body,
+             SourceLocation loc)
       : ExprAST(loc), varName(varName), startExpr(std::move(startExpr)),
         endExpr(std::move(endExpr)), stepExpr(std::move(stepExpr)),
         body(std::move(body)) {}
@@ -125,6 +124,12 @@ public:
   CallExprAST(std::string &callee, std::vector<std::unique_ptr<ExprAST>> args,
               SourceLocation loc)
       : ExprAST(loc), callee(callee), args(std::move(args)) {}
+  Value *codegen() override;
+};
+
+class SyncExprAST : public ExprAST {
+public:
+  SyncExprAST(SourceLocation loc) : ExprAST(loc) {};
   Value *codegen() override;
 };
 
@@ -153,7 +158,9 @@ public:
   const std::string &getName() const { return name; }
   SourceLocation getLoc() const { return loc; }
   bool isUnaryOp() const { return isOperator && name.substr(0, 5) == "unary"; }
-  bool isBinaryOp() const { return isOperator && name.substr(0, 6) == "binary"; }
+  bool isBinaryOp() const {
+    return isOperator && name.substr(0, 6) == "binary";
+  }
   char getOperatorName() const { return name[name.size() - 1]; }
   unsigned getBinaryPrecedence() const { return precedence; }
 };

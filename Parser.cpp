@@ -31,6 +31,7 @@ int getTokPrecedence() {
 
 std::unique_ptr<ExprAST> parseExpression();
 std::unique_ptr<ExprAST> parseVarExpr();
+std::unique_ptr<ExprAST> parseSyncExpr();
 
 // numberexpr ::= number
 std::unique_ptr<ExprAST> parseNumberExpr() {
@@ -214,6 +215,8 @@ std::unique_ptr<ExprAST> parsePrimary() {
     return parseForExpr();
   case tok_var:
     return parseVarExpr();
+  case tok_sync:
+    return parseSyncExpr();
   default:
     return logError("unknown token when expecting an expression");
   }
@@ -327,8 +330,8 @@ std::unique_ptr<ExprAST> parseBinOpRHS(int exprPrecedence,
     }
 
     // Combine LHS and RHS
-    LHS = std::make_unique<BinaryExprAST>(binOp, std::move(LHS),
-                                          std::move(RHS), opLoc);
+    LHS = std::make_unique<BinaryExprAST>(binOp, std::move(LHS), std::move(RHS),
+                                          opLoc);
   }
 }
 
@@ -455,6 +458,24 @@ std::unique_ptr<PrototypeAST> parseExtern() {
         prototype->getBinaryPrecedence();
   }
   return prototype;
+}
+
+std::unique_ptr<ExprAST> parseSyncExpr() {
+  devPrintf("Parser: parseSyncExpr\n");
+  SourceLocation syncLoc = curLoc;
+  getNextToken(); // eat sync
+
+  if (curTok != '(') {
+    return logError("expected '(' after sync");
+  }
+  getNextToken(); // eat '('
+
+  if (curTok != ')') {
+    return logError("expected ')' after sync(");
+  }
+  getNextToken(); // eat ')'
+
+  return std::make_unique<SyncExprAST>(syncLoc);
 }
 
 } // namespace Compiler

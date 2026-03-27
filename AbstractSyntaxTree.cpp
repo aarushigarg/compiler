@@ -42,8 +42,8 @@ public:
   void initialize(Module &module, const std::string &sourceName) {
     diBuilder = std::make_unique<DIBuilder>(module);
     unit = diBuilder->createFile(sourceName, ".");
-    compileUnit = diBuilder->createCompileUnit(
-        dwarf::DW_LANG_C, unit, "Compiler", false, "", 0);
+    compileUnit = diBuilder->createCompileUnit(dwarf::DW_LANG_C, unit,
+                                               "Compiler", false, "", 0);
     doubleType = nullptr;
     lexicalBlocks.clear();
   }
@@ -56,7 +56,8 @@ public:
 
   DIType *getDoubleType() {
     if (!doubleType) {
-      doubleType = diBuilder->createBasicType("double", 64, dwarf::DW_ATE_float);
+      doubleType =
+          diBuilder->createBasicType("double", 64, dwarf::DW_ATE_float);
     }
     return doubleType;
   }
@@ -67,7 +68,8 @@ public:
     for (unsigned i = 0; i < argCount; ++i) {
       types.push_back(getDoubleType());
     }
-    return diBuilder->createSubroutineType(diBuilder->getOrCreateTypeArray(types));
+    return diBuilder->createSubroutineType(
+        diBuilder->getOrCreateTypeArray(types));
   }
 
   DIScope *currentScope() const {
@@ -93,9 +95,8 @@ public:
       return;
     }
 
-    Compiler::builder->SetCurrentDebugLocation(
-        DILocation::get(insertPt.getBlock()->getContext(), loc.line, loc.col,
-                        currentScope()));
+    Compiler::builder->SetCurrentDebugLocation(DILocation::get(
+        insertPt.getBlock()->getContext(), loc.line, loc.col, currentScope()));
   }
 };
 
@@ -126,10 +127,22 @@ static Function *getFunction(const std::string &name) {
 
 static AllocaInst *createEntryBlockAlloca(Function *func,
                                           const std::string &varName) {
-  IRBuilder<> tmpBuilder(&func->getEntryBlock(),
-                         func->getEntryBlock().begin());
+  IRBuilder<> tmpBuilder(&func->getEntryBlock(), func->getEntryBlock().begin());
   return tmpBuilder.CreateAlloca(Type::getDoubleTy(*theContext), nullptr,
                                  varName.c_str());
+}
+
+static Function *getOrCreateRuntimeFunction(const std::string &name,
+                                            FunctionType *funcType) {
+  if (auto *func = theModule->getFunction(name)) {
+    if (func->getFunctionType() == funcType) {
+      return func;
+    }
+    return nullptr;
+  }
+
+  return Function::Create(funcType, Function::ExternalLinkage, name,
+                          theModule.get());
 }
 
 Value *NumberExprAST::codegen() {
@@ -227,7 +240,8 @@ Value *VarExprAST::codegen() {
     builder->CreateStore(initVal, alloca);
 
     DILocalVariable *debugVar = debugInfo.diBuilder->createAutoVariable(
-        scopeBlock, name, debugInfo.unit, getLoc().line, debugInfo.getDoubleType());
+        scopeBlock, name, debugInfo.unit, getLoc().line,
+        debugInfo.getDoubleType());
     debugInfo.diBuilder->insertDeclare(
         alloca, debugVar, debugInfo.diBuilder->createExpression(),
         DILocation::get(*theContext, getLoc().line, getLoc().col, scopeBlock),
@@ -318,7 +332,8 @@ Value *ForExprAST::codegen() {
       debugInfo.currentScope(), debugInfo.unit, getLoc().line, getLoc().col);
   debugInfo.lexicalBlocks.push_back(scopeBlock);
   DILocalVariable *debugVar = debugInfo.diBuilder->createAutoVariable(
-      scopeBlock, varName, debugInfo.unit, getLoc().line, debugInfo.getDoubleType());
+      scopeBlock, varName, debugInfo.unit, getLoc().line,
+      debugInfo.getDoubleType());
   debugInfo.diBuilder->insertDeclare(
       alloca, debugVar, debugInfo.diBuilder->createExpression(),
       DILocation::get(*theContext, getLoc().line, getLoc().col, scopeBlock),
@@ -403,6 +418,21 @@ Value *CallExprAST::codegen() {
   return builder->CreateCall(calleeF, ArgsV, "calltmp");
 }
 
+Value *SyncExprAST::codegen() {
+  debugInfo.emitLocation(this);
+  devPrintf("Codegen: sync\n");
+
+  FunctionType *syncType =
+      FunctionType::get(Type::getDoubleTy(*theContext), false);
+  Function *syncFunc =
+      getOrCreateRuntimeFunction("__compiler_sync_tasks", syncType);
+  if (!syncFunc) {
+    return logErrorV("Runtime function signature mismatch: __compiler_sync_tasks");
+  }
+
+  return builder->CreateCall(syncFunc, {}, "synctmp");
+}
+
 Function *PrototypeAST::codegen() {
   devPrintf("Codegen: prototype %s (%zu args)\n", name.c_str(), args.size());
   // Function with return type double and arguments of type double
@@ -475,8 +505,7 @@ Function *FunctionAST::codegen() {
         debugInfo.getDoubleType(), true);
     debugInfo.diBuilder->insertDeclare(
         alloca, debugArg, debugInfo.diBuilder->createExpression(),
-        DILocation::get(*theContext, protoLoc.line, 0, subprogram),
-        basicBlock);
+        DILocation::get(*theContext, protoLoc.line, 0, subprogram), basicBlock);
   }
 
   debugInfo.emitLocation(body.get());

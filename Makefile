@@ -11,6 +11,8 @@ TEST_SOURCE := tests/full_coverage.cmp
 TEST_OBJECT := tests/full_coverage.o
 TEST_DRIVER := tests/runtime_driver.cpp
 TEST_RUNNER := runtime_tests
+RUNTIME_SOURCE := runtime.cpp
+RUNTIME_OBJECT := runtime.o
 
 .PHONY: all clean run run-dev test test-compile test-correctness
 
@@ -27,15 +29,20 @@ run-dev: $(TARGET)
 
 test: test-compile test-correctness
 
-test-compile: $(TARGET)
+test-compile: $(TEST_OBJECT)
+
+$(TEST_OBJECT): $(TARGET) $(TEST_SOURCE)
 	./$(TARGET) --file $(TEST_SOURCE)
 
-$(TEST_RUNNER): $(TEST_OBJECT) $(TEST_DRIVER)
-	$(CC) $(TEST_CXXFLAGS) $(TEST_DRIVER) $(TEST_OBJECT) -lm -o $(TEST_RUNNER)
+$(TEST_RUNNER): $(TEST_OBJECT) $(TEST_DRIVER) $(RUNTIME_OBJECT)
+	$(CC) $(TEST_CXXFLAGS) $(TEST_DRIVER) $(TEST_OBJECT) $(RUNTIME_OBJECT) -lm -o $(TEST_RUNNER)
 
 test-correctness: $(TARGET) $(TEST_RUNNER)
 	./$(TARGET) --file $(TEST_SOURCE)
 	./$(TEST_RUNNER)
+
+$(RUNTIME_OBJECT): $(RUNTIME_SOURCE)
+	$(CC) $(TEST_CXXFLAGS) -c $(RUNTIME_SOURCE) -o $(RUNTIME_OBJECT)
 
 clean:
 	rm -f $(TARGET) $(TEST_RUNNER) *.o

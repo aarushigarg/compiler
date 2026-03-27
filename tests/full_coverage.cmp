@@ -83,3 +83,6 @@ var outer = 10, inner = outer * 2 in
 
 for j = 1, j < 3 in
   j * 2
+
+def usesync()
+  sync() + 1

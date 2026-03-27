@@ -3,3 +3,4 @@ main
 *.dSYM/
 tmp/
 *.o
+runtime_tests

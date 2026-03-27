@@ -71,6 +71,7 @@ The compiler currently supports:
 - `if ... then ... else ...`
 - `for ... in` loops
 - `var ... in` local bindings
+- `sync()` runtime barrier expression
 - User-defined unary operators
 - User-defined binary operators with custom precedence
 - `#` line comments
@@ -88,6 +89,7 @@ add(1, 2)
 if x < y then x else y
 for i = 1, i < 10, 1 in i * 2
 var a = 1, b = 2 in a + b
+sync()
 def unary!(x) 0 - x
 def binary% 50 (x y) x - y
 ```
@@ -137,6 +139,7 @@ primary ::= identifierexpr
           | ifexpr
           | forexpr
           | varexpr
+          | syncexpr
 ```
 
 Examples:
@@ -145,6 +148,7 @@ Examples:
 42
 x
 (a + b) * 2
+sync()
 ```
 
 ### Identifiers and function calls
@@ -197,6 +201,8 @@ A `var` expression introduces one or more local bindings, then evaluates a body 
 ```text
 varexpr ::= 'var' identifier ('=' expression)?
             (',' identifier ('=' expression)?)* 'in' expression
+
+syncexpr ::= 'sync' '(' ')'
 ```
 
 If a binding has no initializer, it defaults to `0.0`.
@@ -207,6 +213,7 @@ Examples:
 var a = 1 in a + 2
 var a = 1, b = 2 in a + b
 var x, y = 3 in x + y
+sync()
 ```
 
 ### Function signatures
@@ -248,8 +255,20 @@ Recognized keywords:
 - `for`
 - `in`
 - `var`
+- `sync`
 
 Comments start with `#` and continue to the end of the line.
+
+## Runtime Support
+
+The compiler can emit calls to helper functions that are implemented outside
+the source language in [`runtime.cpp`](/runtime.cpp).
+
+`sync()` currently lowers to the runtime symbol `__compiler_sync_tasks`. The
+runtime implementation is a stub for now, so `sync()` behaves like a no-op
+expression that returns `0.0`. This runtime boundary is still important
+because the future `spawn` implementation will use the same mechanism to call
+into a thread pool and synchronization primitives written in C++.
 
 ## Debug Mode
 
