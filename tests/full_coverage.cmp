@@ -72,6 +72,36 @@ def foldlessfalse()
 def foldnested()
   (2 + 3) * (10 - 4)
 
+def simplifyaddzeroleft(x)
+  0 + x
+
+def simplifyaddzeroright(x)
+  x + 0
+
+def simplifysubzero(x)
+  x - 0
+
+def simplifymuloneleft(x)
+  1 * x
+
+def simplifymuloneright(x)
+  x * 1
+
+def simplifymulzeroleft()
+  0 * (4 + 5)
+
+def simplifymulzeroright()
+  (4 + 5) * 0
+
+def foldiftrue(x y)
+  if 1 then x else y
+
+def foldiffalse(x y)
+  if 0 then x else y
+
+def keepsideeffectmulzero(x)
+  printd(x) * 0
+
 def useprintd(x)
   printd(x)
 

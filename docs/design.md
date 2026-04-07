@@ -158,10 +158,14 @@ These features are sufficient to demonstrate:
 Before LLVM IR generation, function bodies are passed through a small AST-level
 optimization stage in `Optimizer.cpp`.
 
-The current optimization pass performs constant folding for builtin numeric
-binary expressions when both operands are known constants.
+The current optimizer performs:
 
-Examples of folds supported now:
+- constant folding for builtin numeric binary expressions when both operands are
+  known constants
+- algebraic simplification for a small set of builtin numeric identities
+- constant-condition `if` folding
+
+Examples of rewrites supported now:
 
 - `2 + 3 -> 5`
 - `9 - 4 -> 5`
@@ -169,9 +173,21 @@ Examples of folds supported now:
 - `3 < 4 -> 1.0`
 - `5 < 2 -> 0.0`
 - nested constant expressions such as `(2 + 3) * (10 - 4) -> 30`
+- `0 + x -> x`
+- `x + 0 -> x`
+- `x - 0 -> x`
+- `1 * x -> x`
+- `x * 1 -> x`
+- `x * 0 -> 0` only when the discarded side is pure
+- `if 1 then a else b -> a`
+- `if 0 then a else b -> b`
 
 This pass runs before code generation, so the folded AST is what gets lowered
 into LLVM IR.
+
+The optimizer uses a conservative purity check before removing subexpressions.
+This prevents rewrites like `printd(x) * 0 -> 0`, because discarding the left
+side would also discard the call's side effects.
 
 ## Async, Sync, And Parfor Design
 
@@ -376,7 +392,8 @@ The repository is organized around these roles:
 
 - ordinary function definitions and calls
 - built-in operators
-- constant folding for builtin numeric expressions
+- constant folding, algebraic simplification, and constant-condition `if`
+  folding
 - custom unary and binary operators
 - conditionals
 - loops

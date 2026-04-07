@@ -4,12 +4,25 @@
 
 #include <cmath>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
 namespace Compiler {
 
 namespace {
+
+bool isPure(const ExprAST *expr);
+
+bool isZero(const ExprAST *expr) {
+  auto *numberExpr = dynamic_cast<const NumberExprAST *>(expr);
+  return numberExpr && numberExpr->getValue() == 0.0;
+}
+
+bool isOne(const ExprAST *expr) {
+  auto *numberExpr = dynamic_cast<const NumberExprAST *>(expr);
+  return numberExpr && numberExpr->getValue() == 1.0;
+}
 
 double foldBinaryConstant(char op, double lhs, double rhs, bool &folded) {
   folded = true;
@@ -26,6 +39,53 @@ double foldBinaryConstant(char op, double lhs, double rhs, bool &folded) {
     folded = false;
     return 0.0;
   }
+}
+
+bool isPure(const ExprAST *expr) {
+  if (!expr) {
+    return true;
+  }
+
+  if (dynamic_cast<const NumberExprAST *>(expr) ||
+      dynamic_cast<const VariableExprAST *>(expr)) {
+    return true;
+  }
+
+  if (auto *unaryExpr = dynamic_cast<const UnaryExprAST *>(expr)) {
+    return isPure(unaryExpr->getOperand());
+  }
+
+  if (auto *binaryExpr = dynamic_cast<const BinaryExprAST *>(expr)) {
+    return isPure(binaryExpr->getLHS()) && isPure(binaryExpr->getRHS());
+  }
+
+  if (auto *ifExpr = dynamic_cast<const IfExprAST *>(expr)) {
+    return isPure(ifExpr->getCondExpr()) && isPure(ifExpr->getThenExpr()) &&
+           isPure(ifExpr->getElseExpr());
+  }
+
+  if (auto *varExpr = dynamic_cast<const VarExprAST *>(expr)) {
+    for (const auto &var : varExpr->getVarNames()) {
+      if (!isPure(var.second.get())) {
+        return false;
+      }
+    }
+    return isPure(varExpr->getBody());
+  }
+
+  if (auto *forExpr = dynamic_cast<const ForExprAST *>(expr)) {
+    return isPure(forExpr->getStartExpr()) && isPure(forExpr->getEndExpr()) &&
+           isPure(forExpr->getStepExpr()) && isPure(forExpr->getBody());
+  }
+
+  if (dynamic_cast<const CallExprAST *>(expr) ||
+      dynamic_cast<const SyncExprAST *>(expr) ||
+      dynamic_cast<const AsyncExprAST *>(expr) ||
+      dynamic_cast<const ParForExprAST *>(expr)) {
+    return false;
+  }
+
+  return false;
 }
 
 std::unique_ptr<ExprAST> optimizeBinaryExpr(std::unique_ptr<ExprAST> expr) {
@@ -48,6 +108,38 @@ std::unique_ptr<ExprAST> optimizeBinaryExpr(std::unique_ptr<ExprAST> expr) {
     if (folded) {
       return std::make_unique<NumberExprAST>(foldedValue, loc);
     }
+  }
+
+  switch (op) {
+  case '+':
+    if (isZero(lhs.get())) {
+      return rhs;
+    }
+    if (isZero(rhs.get())) {
+      return lhs;
+    }
+    break;
+  case '-':
+    if (isZero(rhs.get())) {
+      return lhs;
+    }
+    break;
+  case '*':
+    if (isOne(lhs.get())) {
+      return rhs;
+    }
+    if (isOne(rhs.get())) {
+      return lhs;
+    }
+    if (isZero(lhs.get()) && isPure(rhs.get())) {
+      return std::make_unique<NumberExprAST>(0.0, loc);
+    }
+    if (isZero(rhs.get()) && isPure(lhs.get())) {
+      return std::make_unique<NumberExprAST>(0.0, loc);
+    }
+    break;
+  default:
+    break;
   }
 
   return std::make_unique<BinaryExprAST>(op, std::move(lhs), std::move(rhs),
@@ -74,19 +166,23 @@ std::unique_ptr<ExprAST> optimizeExpr(std::unique_ptr<ExprAST> expr) {
   if (auto *unaryExpr = dynamic_cast<UnaryExprAST *>(expr.get())) {
     SourceLocation loc = unaryExpr->getLoc();
     char op = unaryExpr->getOperator();
-    std::unique_ptr<ExprAST> operand =
-        optimizeExpr(unaryExpr->takeOperand());
+    std::unique_ptr<ExprAST> operand = optimizeExpr(unaryExpr->takeOperand());
     return std::make_unique<UnaryExprAST>(op, std::move(operand), loc);
   }
 
   if (auto *ifExpr = dynamic_cast<IfExprAST *>(expr.get())) {
     SourceLocation loc = ifExpr->getLoc();
-    std::unique_ptr<ExprAST> condExpr =
-        optimizeExpr(ifExpr->takeCondExpr());
-    std::unique_ptr<ExprAST> thenExpr =
-        optimizeExpr(ifExpr->takeThenExpr());
-    std::unique_ptr<ExprAST> elseExpr =
-        optimizeExpr(ifExpr->takeElseExpr());
+    std::unique_ptr<ExprAST> condExpr = optimizeExpr(ifExpr->takeCondExpr());
+    std::unique_ptr<ExprAST> thenExpr = optimizeExpr(ifExpr->takeThenExpr());
+    std::unique_ptr<ExprAST> elseExpr = optimizeExpr(ifExpr->takeElseExpr());
+
+    if (auto *condNumber = dynamic_cast<NumberExprAST *>(condExpr.get())) {
+      if (condNumber->getValue() != 0.0) {
+        return thenExpr;
+      }
+      return elseExpr;
+    }
+
     return std::make_unique<IfExprAST>(std::move(condExpr), std::move(thenExpr),
                                        std::move(elseExpr), loc);
   }
@@ -104,8 +200,7 @@ std::unique_ptr<ExprAST> optimizeExpr(std::unique_ptr<ExprAST> expr) {
   if (auto *forExpr = dynamic_cast<ForExprAST *>(expr.get())) {
     SourceLocation loc = forExpr->getLoc();
     std::string varName = forExpr->getVarName();
-    std::unique_ptr<ExprAST> startExpr =
-        optimizeExpr(forExpr->takeStartExpr());
+    std::unique_ptr<ExprAST> startExpr = optimizeExpr(forExpr->takeStartExpr());
     std::unique_ptr<ExprAST> endExpr = optimizeExpr(forExpr->takeEndExpr());
     std::unique_ptr<ExprAST> stepExpr = optimizeExpr(forExpr->takeStepExpr());
     std::unique_ptr<ExprAST> body = optimizeExpr(forExpr->takeBody());
@@ -119,8 +214,7 @@ std::unique_ptr<ExprAST> optimizeExpr(std::unique_ptr<ExprAST> expr) {
     std::string varName = parForExpr->getVarName();
     std::unique_ptr<ExprAST> startExpr =
         optimizeExpr(parForExpr->takeStartExpr());
-    std::unique_ptr<ExprAST> endExpr =
-        optimizeExpr(parForExpr->takeEndExpr());
+    std::unique_ptr<ExprAST> endExpr = optimizeExpr(parForExpr->takeEndExpr());
     std::unique_ptr<ExprAST> stepExpr =
         optimizeExpr(parForExpr->takeStepExpr());
     std::unique_ptr<ExprAST> body = optimizeExpr(parForExpr->takeBody());
