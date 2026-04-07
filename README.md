@@ -13,7 +13,7 @@ execution model.
 The project covers the full path from source code to native object output:
 
 - lexing and recursive-descent parsing for a custom language
-- AST construction and LLVM IR generation
+- AST construction, constant folding, and LLVM IR generation
 - native object-file emission
 - language features such as functions, conditionals, loops, scoped locals, and
   custom operators
@@ -27,8 +27,9 @@ The project has three main pieces.
 
 ### Compiler front end and code generation
 
-The compiler reads a source file, builds an AST, and lowers that AST to LLVM
-IR. The output is a native object file that can be linked like any other
+The compiler reads a source file, builds an AST, applies AST-level constant
+folding for builtin numeric expressions, and then lowers the optimized tree to
+LLVM IR. The output is a native object file that can be linked like any other
 compiled object.
 
 ### Parallel runtime

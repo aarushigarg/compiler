@@ -54,6 +54,24 @@ def useexterncolon(a b)
 def callexterns(x)
   sin(x) + cos(x)
 
+def foldadd()
+  2 + 3
+
+def foldsub()
+  9 - 4
+
+def foldmul()
+  6 * 7
+
+def foldlesstrue()
+  3 < 4
+
+def foldlessfalse()
+  5 < 2
+
+def foldnested()
+  (2 + 3) * (10 - 4)
+
 def useprintd(x)
   printd(x)
 

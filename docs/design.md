@@ -10,11 +10,12 @@
 6. [Type Model](#type-model)
 7. [Operator Design](#operator-design)
 8. [Control-flow And Scope Support](#control-flow-and-scope-support)
-9. [Async, Sync, And Parfor Design](#async-sync-and-parfor-design)
-10. [Parfor Benchmark Snapshot](#parfor-benchmark-snapshot)
-11. [Debug Information](#debug-information)
-12. [Repository Structure](#repository-structure)
-13. [What The Current Tests Cover](#what-the-current-tests-cover)
+9. [AST Optimization](#ast-optimization)
+10. [Async, Sync, And Parfor Design](#async-sync-and-parfor-design)
+11. [Parfor Benchmark Snapshot](#parfor-benchmark-snapshot)
+12. [Debug Information](#debug-information)
+13. [Repository Structure](#repository-structure)
+14. [What The Current Tests Cover](#what-the-current-tests-cover)
 
 ## Project Goal
 
@@ -39,8 +40,9 @@ The compiler pipeline is organized around these stages:
 1. lexing in `Lexer.*`
 2. recursive-descent parsing in `Parser.*`
 3. AST construction in `AbstractSyntaxTree.*`
-4. LLVM IR generation in `AbstractSyntaxTree.cpp`
-5. object-file emission in `Main.cpp`
+4. AST optimization in `Optimizer.cpp`
+5. LLVM IR generation in `AbstractSyntaxTree.cpp`
+6. object-file emission in `Main.cpp`
 
 This keeps the front end, code generation, and runtime support separated while
 still keeping the project small enough to follow end to end.
@@ -150,6 +152,26 @@ These features are sufficient to demonstrate:
 - variable shadowing
 - sequential and parallel loop lowering
 - conditional control flow in LLVM IR
+
+## AST Optimization
+
+Before LLVM IR generation, function bodies are passed through a small AST-level
+optimization stage in `Optimizer.cpp`.
+
+The current optimization pass performs constant folding for builtin numeric
+binary expressions when both operands are known constants.
+
+Examples of folds supported now:
+
+- `2 + 3 -> 5`
+- `9 - 4 -> 5`
+- `6 * 7 -> 42`
+- `3 < 4 -> 1.0`
+- `5 < 2 -> 0.0`
+- nested constant expressions such as `(2 + 3) * (10 - 4) -> 30`
+
+This pass runs before code generation, so the folded AST is what gets lowered
+into LLVM IR.
 
 ## Async, Sync, And Parfor Design
 
@@ -337,6 +359,7 @@ The repository is organized around these roles:
 - `AbstractSyntaxTree.*`: AST and code generation
 - `Main.cpp`: compile pipeline and object emission
 - `runtime.cpp`: runtime support for async and sync
+- `Optimizer.*`: AST-level optimization
 - `tests/parfor_coverage.cmp`: parallel-loop coverage input
 - `tests/parfor_test_driver.cpp`: parallel-loop correctness harness
 - `tests/parfor_benchmark.cmp`: benchmark input
@@ -353,6 +376,7 @@ The repository is organized around these roles:
 
 - ordinary function definitions and calls
 - built-in operators
+- constant folding for builtin numeric expressions
 - custom unary and binary operators
 - conditionals
 - loops

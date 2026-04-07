@@ -4,7 +4,7 @@ LLVM_LDFLAGS := $(shell llvm-config --ldflags --system-libs --libs all)
 
 CXXFLAGS := -std=c++17 -O3 $(LLVM_CXXFLAGS) -Iinclude
 TEST_CXXFLAGS := -std=c++17 -O3
-COMPILER_SOURCES := Main.cpp Lexer.cpp Parser.cpp AbstractSyntaxTree.cpp LogErrors.cpp
+COMPILER_SOURCES := Main.cpp Lexer.cpp Parser.cpp AbstractSyntaxTree.cpp LogErrors.cpp Optimizer.cpp
 TARGET := main
 RUNTIME_OBJECT := runtime.o
 PROGRAM ?=

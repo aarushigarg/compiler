@@ -1,6 +1,7 @@
 #include "AbstractSyntaxTree.h"
 
 #include "LogErrors.h"
+#include "Optimizer.h"
 
 #include "llvm/ADT/APFloat.h"
 #include "llvm/BinaryFormat/Dwarf.h"
@@ -820,6 +821,8 @@ Function *PrototypeAST::codegen() {
 }
 
 Function *FunctionAST::codegen() {
+  body = optimizeExpr(std::move(body));
+
   // First check for existing function from previous 'extern' declaration
   Function *func = theModule->getFunction(prototype->getSymbolName());
 
