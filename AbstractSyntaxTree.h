@@ -39,6 +39,7 @@ class NumberExprAST : public ExprAST {
 
 public:
   NumberExprAST(double val, SourceLocation loc) : ExprAST(loc), val(val) {}
+  double getValue() const { return val; }
   Value *codegen() override;
 };
 
@@ -48,6 +49,7 @@ class VariableExprAST : public ExprAST {
 public:
   VariableExprAST(const std::string &name, SourceLocation loc)
       : ExprAST(loc), name(name) {}
+  const std::string &getName() const { return name; }
   Value *codegen() override;
 };
 
@@ -58,6 +60,9 @@ class UnaryExprAST : public ExprAST {
 public:
   UnaryExprAST(char op, std::unique_ptr<ExprAST> operand, SourceLocation loc)
       : ExprAST(loc), op(op), operand(std::move(operand)) {}
+  char getOperator() const { return op; }
+  const ExprAST *getOperand() const { return operand.get(); }
+  std::unique_ptr<ExprAST> takeOperand() { return std::move(operand); }
   Value *codegen() override;
 };
 
@@ -69,6 +74,11 @@ public:
   BinaryExprAST(char op, std::unique_ptr<ExprAST> LHS,
                 std::unique_ptr<ExprAST> RHS, SourceLocation loc)
       : ExprAST(loc), op(op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
+  char getOperator() const { return op; }
+  const ExprAST *getLHS() const { return LHS.get(); }
+  const ExprAST *getRHS() const { return RHS.get(); }
+  std::unique_ptr<ExprAST> takeLHS() { return std::move(LHS); }
+  std::unique_ptr<ExprAST> takeRHS() { return std::move(RHS); }
   Value *codegen() override;
 };
 
@@ -80,6 +90,10 @@ public:
   VarExprAST(std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> vars,
              std::unique_ptr<ExprAST> body, SourceLocation loc)
       : ExprAST(loc), varNames(std::move(vars)), body(std::move(body)) {}
+  const auto &getVarNames() const { return varNames; }
+  const ExprAST *getBody() const { return body.get(); }
+  auto takeVarNames() { return std::move(varNames); }
+  std::unique_ptr<ExprAST> takeBody() { return std::move(body); }
   Value *codegen() override;
 };
 
@@ -94,6 +108,12 @@ public:
             std::unique_ptr<ExprAST> elseExpr, SourceLocation loc)
       : ExprAST(loc), condExpr(std::move(condExpr)),
         thenExpr(std::move(thenExpr)), elseExpr(std::move(elseExpr)) {}
+  const ExprAST *getCondExpr() const { return condExpr.get(); }
+  const ExprAST *getThenExpr() const { return thenExpr.get(); }
+  const ExprAST *getElseExpr() const { return elseExpr.get(); }
+  std::unique_ptr<ExprAST> takeCondExpr() { return std::move(condExpr); }
+  std::unique_ptr<ExprAST> takeThenExpr() { return std::move(thenExpr); }
+  std::unique_ptr<ExprAST> takeElseExpr() { return std::move(elseExpr); }
   Value *codegen() override;
 };
 
@@ -112,6 +132,15 @@ public:
       : ExprAST(loc), varName(varName), startExpr(std::move(startExpr)),
         endExpr(std::move(endExpr)), stepExpr(std::move(stepExpr)),
         body(std::move(body)) {}
+  const std::string &getVarName() const { return varName; }
+  const ExprAST *getStartExpr() const { return startExpr.get(); }
+  const ExprAST *getEndExpr() const { return endExpr.get(); }
+  const ExprAST *getStepExpr() const { return stepExpr.get(); }
+  const ExprAST *getBody() const { return body.get(); }
+  std::unique_ptr<ExprAST> takeStartExpr() { return std::move(startExpr); }
+  std::unique_ptr<ExprAST> takeEndExpr() { return std::move(endExpr); }
+  std::unique_ptr<ExprAST> takeStepExpr() { return std::move(stepExpr); }
+  std::unique_ptr<ExprAST> takeBody() { return std::move(body); }
   Value *codegen() override;
 };
 
@@ -130,6 +159,15 @@ public:
       : ExprAST(loc), varName(varName), startExpr(std::move(startExpr)),
         endExpr(std::move(endExpr)), stepExpr(std::move(stepExpr)),
         body(std::move(body)) {}
+  const std::string &getVarName() const { return varName; }
+  const ExprAST *getStartExpr() const { return startExpr.get(); }
+  const ExprAST *getEndExpr() const { return endExpr.get(); }
+  const ExprAST *getStepExpr() const { return stepExpr.get(); }
+  const ExprAST *getBody() const { return body.get(); }
+  std::unique_ptr<ExprAST> takeStartExpr() { return std::move(startExpr); }
+  std::unique_ptr<ExprAST> takeEndExpr() { return std::move(endExpr); }
+  std::unique_ptr<ExprAST> takeStepExpr() { return std::move(stepExpr); }
+  std::unique_ptr<ExprAST> takeBody() { return std::move(body); }
   Value *codegen() override;
 };
 
@@ -142,6 +180,9 @@ public:
   CallExprAST(std::string &callee, std::vector<std::unique_ptr<ExprAST>> args,
               SourceLocation loc)
       : ExprAST(loc), callee(callee), args(std::move(args)) {}
+  const std::string &getCallee() const { return callee; }
+  const auto &getArgs() const { return args; }
+  auto takeArgs() { return std::move(args); }
   Value *codegen() override;
 };
 
@@ -159,6 +200,9 @@ public:
   AsyncExprAST(std::string &callee, std::vector<std::unique_ptr<ExprAST>> args,
                SourceLocation loc)
       : ExprAST(loc), callee(callee), args(std::move(args)) {}
+  const std::string &getCallee() const { return callee; }
+  const auto &getArgs() const { return args; }
+  auto takeArgs() { return std::move(args); }
   Value *codegen() override;
 };
 
@@ -204,6 +248,8 @@ public:
               std::unique_ptr<ExprAST> body)
       : prototype(std::move(prototype)), body(std::move(body)) {}
   const PrototypeAST &getProto() const { return *prototype; }
+  const ExprAST *getBody() const { return body.get(); }
+  std::unique_ptr<ExprAST> takeBody() { return std::move(body); }
   Function *codegen();
 };
 
